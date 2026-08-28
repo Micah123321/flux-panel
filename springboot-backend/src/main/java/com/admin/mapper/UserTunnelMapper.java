@@ -13,7 +13,6 @@ import java.util.List;
  *  Mapper 接口
  * </p>
  *
- * @author QAQ
  * @since 2025-06-03
  */
 public interface UserTunnelMapper extends BaseMapper<UserTunnel> {

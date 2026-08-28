@@ -16,20 +16,41 @@ get_architecture() {
     esac
 }
 
+REPO_OWNER="Micah123321"
+REPO_NAME="flux-panel"
+RELEASE_BASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download"
+
 # 构建下载地址
 build_download_url() {
     local ARCH=$(get_architecture)
-    echo "https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/gost-${ARCH}"
+    echo "${RELEASE_BASE_URL}/gost-${ARCH}"
 }
 
 # 下载地址
 DOWNLOAD_URL=$(build_download_url)
 INSTALL_DIR="/etc/gost"
-COUNTRY=$(curl -s https://ipinfo.io/country)
+COUNTRY=$(curl -fsSL --retry 3 https://ipinfo.io/country 2>/dev/null || true)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
 fi
+
+download_file() {
+  local url="$1"
+  local output="$2"
+
+  if ! curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"; then
+    echo "❌ 下载失败: $url"
+    rm -f "$output"
+    return 1
+  fi
+
+  if [[ ! -s "$output" ]]; then
+    echo "❌ 下载文件为空: $output"
+    rm -f "$output"
+    return 1
+  fi
+}
 
 
 
@@ -40,7 +61,7 @@ show_menu() {
   echo "==============================================="
   echo "请选择操作："
   echo "1. 安装"
-  echo "2. 更新"  
+  echo "2. 更新"
   echo "3. 卸载"
   echo "4. 退出"
   echo "==============================================="
@@ -61,24 +82,24 @@ check_and_install_tcpkill() {
   if command -v tcpkill &> /dev/null; then
     return 0
   fi
-  
+
   # 检测操作系统类型
   OS_TYPE=$(uname -s)
-  
+
   # 检查是否需要 sudo
   if [[ $EUID -ne 0 ]]; then
     SUDO_CMD="sudo"
   else
     SUDO_CMD=""
   fi
-  
+
   if [[ "$OS_TYPE" == "Darwin" ]]; then
     if command -v brew &> /dev/null; then
       brew install dsniff &> /dev/null
     fi
     return 0
   fi
-  
+
   # 检测 Linux 发行版并安装对应的包
   if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -90,7 +111,7 @@ check_and_install_tcpkill() {
   else
     return 0
   fi
-  
+
   case $DISTRO in
     ubuntu|debian)
       $SUDO_CMD apt update &> /dev/null
@@ -119,7 +140,7 @@ check_and_install_tcpkill() {
       $SUDO_CMD xbps-install -Sy dsniff &> /dev/null
       ;;
   esac
-  
+
   return 0
 }
 
@@ -128,15 +149,15 @@ check_and_install_tcpkill() {
 get_config_params() {
   if [[ -z "$SERVER_ADDR" || -z "$SECRET" ]]; then
     echo "请输入配置参数："
-    
+
     if [[ -z "$SERVER_ADDR" ]]; then
       read -p "服务器地址: " SERVER_ADDR
     fi
-    
+
     if [[ -z "$SECRET" ]]; then
       read -p "密钥: " SECRET
     fi
-    
+
     if [[ -z "$SERVER_ADDR" || -z "$SECRET" ]]; then
       echo "❌ 参数不完整，操作取消。"
       exit 1
@@ -160,7 +181,7 @@ install_gost() {
 
     # 检查并安装 tcpkill
   check_and_install_tcpkill
-  
+
 
   mkdir -p "$INSTALL_DIR"
 
@@ -176,16 +197,18 @@ install_gost() {
 
   # 下载 gost
   echo "⬇️ 下载 gost 中..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost"
-  if [[ ! -f "$INSTALL_DIR/gost" || ! -s "$INSTALL_DIR/gost" ]]; then
-    echo "❌ 下载失败，请检查网络或下载链接。"
+  if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost"; then
     exit 1
   fi
   chmod +x "$INSTALL_DIR/gost"
+  if ! GOST_VERSION=$("$INSTALL_DIR/gost" -V 2>&1); then
+    echo "❌ 下载的 gost 无法执行：$GOST_VERSION"
+    exit 1
+  fi
   echo "✅ 下载完成"
 
   # 打印版本
-  echo "🔎 gost 版本：$($INSTALL_DIR/gost -V)"
+  echo "🔎 gost 版本：$GOST_VERSION"
 
   # 写入 config.json (安装时总是创建新的)
   CONFIG_FILE="$INSTALL_DIR/config.json"
@@ -247,22 +270,26 @@ EOF
 # 更新功能
 update_gost() {
   echo "🔄 开始更新 GOST..."
-  
+
   if [[ ! -d "$INSTALL_DIR" ]]; then
     echo "❌ GOST 未安装，请先选择安装。"
     return 1
   fi
-  
+
   echo "📥 使用下载地址: $DOWNLOAD_URL"
-  
+
   # 检查并安装 tcpkill
   check_and_install_tcpkill
-  
+
   # 先下载新版本
   echo "⬇️ 下载最新版本..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost.new"
-  if [[ ! -f "$INSTALL_DIR/gost.new" || ! -s "$INSTALL_DIR/gost.new" ]]; then
-    echo "❌ 下载失败。"
+  if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost.new"; then
+    return 1
+  fi
+  chmod +x "$INSTALL_DIR/gost.new"
+  if ! GOST_VERSION=$("$INSTALL_DIR/gost.new" -V 2>&1); then
+    echo "❌ 下载的新版本 gost 无法执行：$GOST_VERSION"
+    rm -f "$INSTALL_DIR/gost.new"
     return 1
   fi
 
@@ -274,22 +301,21 @@ update_gost() {
 
   # 替换文件
   mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
-  chmod +x "$INSTALL_DIR/gost"
-  
+
   # 打印版本
-  echo "🔎 新版本：$($INSTALL_DIR/gost -V)"
+  echo "🔎 新版本：$GOST_VERSION"
 
   # 重启服务
   echo "🔄 重启服务..."
   systemctl start gost
-  
+
   echo "✅ 更新完成，服务已重新启动。"
 }
 
 # 卸载功能
 uninstall_gost() {
   echo "🗑️ 开始卸载 GOST..."
-  
+
   read -p "确认卸载 GOST 吗？此操作将删除所有相关文件 (y/N): " confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "❌ 取消卸载"
@@ -333,8 +359,8 @@ main() {
   # 显示交互式菜单
   while true; do
     show_menu
-    read -p "请输入选项 (1-5): " choice
-    
+    read -p "请输入选项 (1-4): " choice
+
     case $choice in
       1)
         install_gost
@@ -352,17 +378,12 @@ main() {
         exit 0
         ;;
       4)
-        block_protocol
-        delete_self
-        exit 0
-        ;;
-      5)
         echo "👋 退出脚本"
         delete_self
         exit 0
         ;;
       *)
-        echo "❌ 无效选项，请输入 1-5"
+        echo "❌ 无效选项，请输入 1-4"
         echo ""
         ;;
     esac

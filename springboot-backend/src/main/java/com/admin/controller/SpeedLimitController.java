@@ -18,7 +18,6 @@ import java.util.Map;
  * 限速规则前端控制器
  * </p>
  *
- * @author QAQ
  * @since 2025-06-04
  */
 @RestController

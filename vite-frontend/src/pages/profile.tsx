@@ -41,7 +41,7 @@ export default function ProfilePage() {
   useEffect(() => {
     // 获取用户信息
     const name = localStorage.getItem('name') || 'Admin';
-    
+
     // 兼容处理：如果没有admin字段，根据role_id判断（0为管理员）
     let adminFlag = localStorage.getItem('admin') === 'true';
     if (localStorage.getItem('admin') === null) {
@@ -50,7 +50,7 @@ export default function ProfilePage() {
       // 补充设置admin字段，避免下次再次判断
       localStorage.setItem('admin', adminFlag.toString());
     }
-    
+
     setUsername(name);
     setIsAdmin(adminFlag);
   }, []);
@@ -176,8 +176,8 @@ export default function ProfilePage() {
                 <h3 className="text-base font-medium text-foreground">{username}</h3>
                 <div className="flex items-center space-x-2 mt-1">
                   <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                    isAdmin 
-                      ? 'bg-primary-100 dark:bg-primary-500/20 text-primary-700 dark:text-primary-300' 
+                    isAdmin
+                      ? 'bg-primary-100 dark:bg-primary-500/20 text-primary-700 dark:text-primary-300'
                       : 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300'
                   }`}>
                     {isAdmin ? '管理员' : '普通用户'}
@@ -208,7 +208,7 @@ export default function ProfilePage() {
                   <span className="text-xs text-foreground text-center">{item.label}</span>
                 </button>
               ))}
-              
+
               {/* 修改密码 */}
               <button
                 onClick={onOpen}
@@ -221,7 +221,7 @@ export default function ProfilePage() {
                 </div>
                 <span className="text-xs text-foreground text-center">修改密码</span>
               </button>
-              
+
               {/* 退出登录 */}
               <button
                 onClick={handleLogout}
@@ -241,9 +241,9 @@ export default function ProfilePage() {
         <div className="fixed inset-x-0 bottom-20 text-center py-4">
                <p className="text-xs text-gray-400 dark:text-gray-500">
                  Powered by{' '}
-                 <a 
-                   href="https://github.com/bqlpfy/flux-panel" 
-                   target="_blank" 
+                 <a
+                   href="https://github.com/Micah123321/flux-panel"
+                   target="_blank"
                    rel="noopener noreferrer"
                    className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                  >
@@ -251,19 +251,19 @@ export default function ProfilePage() {
                  </a>
                </p>
                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                 v{ isWebViewFunc() ? siteConfig.app_version : siteConfig.version}
+                 v{siteConfig.version}
                </p>
              </div>
 
       </div>
 
 
-      
+
 
 
       {/* 修改密码弹窗 */}
-      <Modal 
-        isOpen={isOpen} 
+      <Modal
+        isOpen={isOpen}
         onOpenChange={() => {
           onOpenChange();
           resetPasswordForm();
@@ -316,8 +316,8 @@ export default function ProfilePage() {
                 <Button color="default" variant="light" onPress={onClose}>
                   取消
                 </Button>
-                <Button 
-                  color="primary" 
+                <Button
+                  color="primary"
                   onPress={handlePasswordSubmit}
                   isLoading={passwordLoading}
                 >

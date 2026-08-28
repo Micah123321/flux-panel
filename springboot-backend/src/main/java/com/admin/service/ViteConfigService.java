@@ -11,7 +11,6 @@ import java.util.Map;
  *  网站配置服务类
  * </p>
  *
- * @author QAQ
  * @since 2025-07-24
  */
 public interface ViteConfigService extends IService<ViteConfig> {

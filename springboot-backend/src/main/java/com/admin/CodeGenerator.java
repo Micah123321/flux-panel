@@ -44,7 +44,6 @@ public class CodeGenerator {
         GlobalConfig gc = new GlobalConfig();
         String projectPath = System.getProperty("user.dir");
         gc.setOutputDir(projectPath + "/src/main/java");
-        gc.setAuthor("QAQ");
         gc.setOpen(false);
         // gc.setSwagger2(true); 实体属性 Swagger2 注解
         gc.setServiceName("%sService");
@@ -56,11 +55,11 @@ public class CodeGenerator {
         String dbName = System.getenv("DB_NAME");
         String dbUser = System.getenv("DB_USER");
         String dbPassword = System.getenv("DB_PASSWORD");
-        
+
         if (dbHost == null || dbName == null || dbUser == null || dbPassword == null) {
             throw new MybatisPlusException("请设置数据库环境变量: DB_HOST, DB_NAME, DB_USER, DB_PASSWORD");
         }
-        
+
         dsc.setUrl("jdbc:mysql://" + dbHost + "/" + dbName + "?useUnicode=true&useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai");
         dsc.setDriverName("com.mysql.cj.jdbc.Driver");
         dsc.setUsername(dbUser);

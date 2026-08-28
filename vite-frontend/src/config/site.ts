@@ -5,14 +5,12 @@ export type SiteConfig = typeof siteConfig;
 // 缓存相关常量
 const CACHE_PREFIX = 'vite_config_';
 const VERSION = "1.4.3";
-const APP_VERSION = "1.0.3";
 
 const getInitialConfig = () => {
   if (typeof window === 'undefined') {
     return {
       name: "flux",
       version: VERSION,
-      app_version: APP_VERSION,
     };
   }
 
@@ -21,13 +19,11 @@ const getInitialConfig = () => {
       return {
         name: cachedAppName,
         version: VERSION,
-        app_version: APP_VERSION,
       };
     }
   return {
     name: "flux",
     version: VERSION,
-    app_version: APP_VERSION,
   };
 };
 

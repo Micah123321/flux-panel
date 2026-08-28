@@ -8,17 +8,38 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v6.yml"
-GOST_SQL_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/gost.sql"
+REPO_OWNER="Micah123321"
+REPO_NAME="flux-panel"
+RAW_BASE_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/main"
 
-COUNTRY=$(curl -s https://ipinfo.io/country)
+DOCKER_COMPOSEV4_URL="${RAW_BASE_URL}/docker-compose-v4.yml"
+DOCKER_COMPOSEV6_URL="${RAW_BASE_URL}/docker-compose-v6.yml"
+GOST_SQL_URL="${RAW_BASE_URL}/gost.sql"
+
+COUNTRY=$(curl -fsSL --retry 3 https://ipinfo.io/country 2>/dev/null || true)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
     DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
     GOST_SQL_URL="https://ghfast.top/${GOST_SQL_URL}"
 fi
+
+download_file() {
+  local url="$1"
+  local output="$2"
+
+  if ! curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"; then
+    echo "❌ 下载失败: $url"
+    rm -f "$output"
+    return 1
+  fi
+
+  if [[ ! -s "$output" ]]; then
+    echo "❌ 下载文件为空: $output"
+    rm -f "$output"
+    return 1
+  fi
+}
 
 
 
@@ -196,14 +217,14 @@ install_panel() {
   echo "🔽 下载必要文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  download_file "$DOCKER_COMPOSE_URL" "docker-compose.yml"
 
   # 检查 gost.sql 是否已存在
   if [[ -f "gost.sql" ]]; then
     echo "⏭️ 跳过下载: gost.sql (使用当前位置的文件)"
   else
     echo "📡 下载数据库初始化文件..."
-    curl -L -o gost.sql "$GOST_SQL_URL"
+    download_file "$GOST_SQL_URL" "gost.sql"
   fi
   echo "✅ 文件准备完成"
 
@@ -243,7 +264,7 @@ update_panel() {
   echo "🔽 下载最新配置文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  download_file "$DOCKER_COMPOSE_URL" "docker-compose.yml"
   echo "✅ 下载完成"
 
   # 自动检测并配置 IPv6 支持
@@ -1055,7 +1076,7 @@ uninstall_panel() {
     echo "⚠️ 未找到 docker-compose.yml 文件，正在下载以完成卸载..."
     DOCKER_COMPOSE_URL=$(get_docker_compose_url)
     echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-    curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+    download_file "$DOCKER_COMPOSE_URL" "docker-compose.yml"
     echo "✅ docker-compose.yml 下载完成"
   fi
 

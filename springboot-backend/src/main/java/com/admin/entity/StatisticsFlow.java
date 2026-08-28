@@ -8,10 +8,9 @@ import lombok.EqualsAndHashCode;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
- * @author QAQ
  * @since 2025-08-14
  */
 @Data

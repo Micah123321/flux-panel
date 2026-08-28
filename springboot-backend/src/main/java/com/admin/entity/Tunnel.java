@@ -10,7 +10,6 @@ import lombok.EqualsAndHashCode;
  * 隧道实体类
  * </p>
  *
- * @author QAQ
  * @since 2025-06-03
  */
 @Data

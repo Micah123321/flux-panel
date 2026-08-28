@@ -129,7 +129,7 @@ export default function AdminLayout({
   useEffect(() => {
     // 获取用户信息
     const name = localStorage.getItem('name') || 'Admin';
-    
+
     // 兼容处理：如果没有admin字段，根据role_id判断（0为管理员）
     let adminFlag = localStorage.getItem('admin') === 'true';
     if (localStorage.getItem('admin') === null) {
@@ -138,7 +138,7 @@ export default function AdminLayout({
       // 补充设置admin字段，避免下次再次判断
       localStorage.setItem('admin', adminFlag.toString());
     }
-    
+
     setUsername(name);
     setIsAdmin(adminFlag);
 
@@ -237,7 +237,7 @@ export default function AdminLayout({
   };
 
   // 过滤菜单项（根据权限）
-  const filteredMenuItems = menuItems.filter(item => 
+  const filteredMenuItems = menuItems.filter(item =>
     !item.adminOnly || isAdmin
   );
 
@@ -245,7 +245,7 @@ export default function AdminLayout({
           <div className={`flex ${isMobile ? 'min-h-screen' : 'h-screen'} bg-gray-100 dark:bg-black`}>
       {/* 移动端遮罩层 */}
       {isMobile && mobileMenuVisible && (
-        <div 
+        <div
           className="fixed inset-0 backdrop-blur-sm bg-white/50 dark:bg-black/30 z-40"
           onClick={hideMobileMenu}
         />
@@ -253,13 +253,13 @@ export default function AdminLayout({
 
       {/* 左侧菜单栏 */}
       <aside className={`
-        ${isMobile ? 'fixed' : 'relative'} 
+        ${isMobile ? 'fixed' : 'relative'}
         ${isMobile && !mobileMenuVisible ? '-translate-x-full' : 'translate-x-0'}
-        ${isMobile ? 'w-64' : 'w-72'} 
-        bg-white dark:bg-black 
-        shadow-lg 
+        ${isMobile ? 'w-64' : 'w-72'}
+        bg-white dark:bg-black
+        shadow-lg
         border-r border-gray-200 dark:border-gray-600
-        z-50 
+        z-50
         transition-transform duration-300 ease-in-out
         flex flex-col
         ${isMobile ? 'h-screen' : 'h-full'}
@@ -288,8 +288,8 @@ export default function AdminLayout({
                      className={`
                        w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left
                        transition-colors duration-200 min-h-[44px]
-                       ${isActive 
-                         ? 'bg-primary-100 dark:bg-primary-600/20 text-primary-600 dark:text-primary-300' 
+                       ${isActive
+                         ? 'bg-primary-100 dark:bg-primary-600/20 text-primary-600 dark:text-primary-300'
                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-900'
                        }
                      `}
@@ -310,9 +310,9 @@ export default function AdminLayout({
           <div className="text-center">
             <p className="text-xs text-gray-400 dark:text-gray-500">
               Powered by{' '}
-              <a 
-                href="https://github.com/bqlpfy/flux-panel" 
-                target="_blank" 
+              <a
+                href="https://github.com/Micah123321/flux-panel"
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               >
@@ -391,8 +391,8 @@ export default function AdminLayout({
       </div>
 
       {/* 修改密码弹窗 */}
-      <Modal 
-        isOpen={isOpen} 
+      <Modal
+        isOpen={isOpen}
         onOpenChange={() => {
           onOpenChange();
           resetPasswordForm();
@@ -445,8 +445,8 @@ export default function AdminLayout({
                 <Button color="default" variant="light" onPress={onClose}>
                   取消
                 </Button>
-                <Button 
-                  color="primary" 
+                <Button
+                  color="primary"
                   onPress={handlePasswordSubmit}
                   isLoading={passwordLoading}
                 >
@@ -459,4 +459,4 @@ export default function AdminLayout({
       </Modal>
     </div>
   );
-} 
+}

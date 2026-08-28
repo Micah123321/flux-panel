@@ -18,17 +18,16 @@ import java.util.Map;
  *  网站配置服务实现类
  * </p>
  *
- * @author QAQ
  * @since 2025-07-24
  */
 @Service
 public class ViteConfigServiceImpl extends ServiceImpl<ViteConfigMapper, ViteConfig> implements ViteConfigService {
 
     // ========== 常量定义 ==========
-    
+
     /** 成功响应消息 */
     private static final String SUCCESS_UPDATE_MSG = "配置更新成功";
-    
+
     /** 错误响应消息 */
     private static final String ERROR_UPDATE_MSG = "配置更新失败";
     private static final String ERROR_CONFIG_NOT_FOUND = "配置不存在";
@@ -39,24 +38,24 @@ public class ViteConfigServiceImpl extends ServiceImpl<ViteConfigMapper, ViteCon
 
     /**
      * 获取所有网站配置
-     * 
+     *
      * @return 包含所有配置的Map
      */
     @Override
     public R getConfigs() {
         List<ViteConfig> configList = this.list();
         Map<String, String> configMap = new HashMap<>();
-        
+
         for (ViteConfig config : configList) {
             configMap.put(config.getName(), config.getValue());
         }
-        
+
         return R.ok(configMap);
     }
 
     /**
      * 根据配置名称获取配置值
-     * 
+     *
      * @param name 配置名称
      * @return 配置响应对象
      */
@@ -79,7 +78,7 @@ public class ViteConfigServiceImpl extends ServiceImpl<ViteConfigMapper, ViteCon
 
     /**
      * 批量更新网站配置
-     * 
+     *
      * @param configMap 配置Map
      * @return 更新结果响应
      */
@@ -93,11 +92,11 @@ public class ViteConfigServiceImpl extends ServiceImpl<ViteConfigMapper, ViteCon
             for (Map.Entry<String, String> entry : configMap.entrySet()) {
                 String name = entry.getKey();
                 String value = entry.getValue();
-                
+
                 if (!StringUtils.hasText(name)) {
                     continue; // 跳过无效的配置名
                 }
-                
+
                 updateOrCreateConfig(name, value);
             }
             return R.ok(SUCCESS_UPDATE_MSG);
@@ -108,7 +107,7 @@ public class ViteConfigServiceImpl extends ServiceImpl<ViteConfigMapper, ViteCon
 
     /**
      * 更新单个配置项
-     * 
+     *
      * @param name 配置名
      * @param value 配置值
      * @return 更新结果响应

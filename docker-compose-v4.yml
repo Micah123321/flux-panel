@@ -26,7 +26,7 @@ services:
       retries: 10
 
   backend:
-    image: bqlpfy/springboot-backend:1.4.3
+    image: ghcr.io/micah123321/springboot-backend:latest
     container_name: springboot-backend
     restart: unless-stopped
     environment:
@@ -54,7 +54,7 @@ services:
       start_period: 90s
 
   frontend:
-    image: bqlpfy/vite-frontend:1.4.3
+    image: ghcr.io/micah123321/vite-frontend:latest
     container_name: vite-frontend
     restart: unless-stopped
     ports:
@@ -65,7 +65,6 @@ services:
     networks:
       - gost-network
 
-
 volumes:
   mysql_data:
     name: mysql_data
@@ -74,11 +73,10 @@ volumes:
     name: backend_logs
     driver: local
 
-
 networks:
   gost-network:
     name: gost-network
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16 
+        - subnet: 172.20.0.0/16

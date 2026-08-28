@@ -12,7 +12,6 @@ import java.util.Map;
  *  服务类
  * </p>
  *
- * @author QAQ
  * @since 2025-06-03
  */
 public interface ForwardService extends IService<Forward> {

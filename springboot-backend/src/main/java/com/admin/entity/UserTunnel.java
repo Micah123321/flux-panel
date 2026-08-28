@@ -11,10 +11,9 @@ import com.baomidou.mybatisplus.annotation.TableId;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
- * @author QAQ
  * @since 2025-06-03
  */
 @Data

@@ -15,7 +15,6 @@ import java.util.Map;
  *  前端控制器
  * </p>
  *
- * @author QAQ
  * @since 2025-06-03
  */
 @RestController
