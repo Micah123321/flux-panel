@@ -147,6 +147,8 @@ jspm_packages/
 
 # Optional npm cache directory
 .npm
+.npm-cache/
+.pnpm-store/
 
 # Optional eslint cache
 .eslintcache
@@ -238,22 +240,3 @@ gitee/
 
 
 
-# ==========================================
-# 其他
-# ==========================================
-
-# 压缩文件
-*.7z
-*.dmg
-*.gz
-*.iso
-*.rar
-*.tar
-*.zip
-
-# 证书文件
-*.crt
-*.cert
-doraemon.jks
-device.id
-commit.sh
