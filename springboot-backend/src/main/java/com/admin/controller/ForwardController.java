@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -57,6 +59,23 @@ public class ForwardController extends BaseController {
     public R forceDelete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
         return forwardService.forceDeleteForward(id);
+    }
+
+    @LogAnnotation
+    @PostMapping("/batch-delete")
+    @SuppressWarnings("unchecked")
+    public R batchDelete(@RequestBody Map<String, Object> params) {
+        Object idsObj = params.get("ids");
+        if (!(idsObj instanceof List)) {
+            return R.err("请提供要删除的转发ID列表");
+        }
+        List<Object> rawIds = (List<Object>) idsObj;
+        List<Long> ids = new ArrayList<>();
+        for (Object rawId : rawIds) {
+            ids.add(Long.valueOf(rawId.toString()));
+        }
+        boolean force = Boolean.TRUE.equals(params.get("force"));
+        return forwardService.deleteForwards(ids, force);
     }
 
     @LogAnnotation

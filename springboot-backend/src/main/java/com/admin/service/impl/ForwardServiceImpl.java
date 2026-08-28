@@ -321,6 +321,44 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
     }
 
+    @Override
+    public R deleteForwards(List<Long> ids, boolean force) {
+        if (ids == null || ids.isEmpty()) {
+            return R.err("请提供要删除的转发ID列表");
+        }
+        // 去重，避免同一转发被重复处理
+        List<Long> distinctIds = ids.stream().distinct().collect(Collectors.toList());
+
+        List<Long> successIds = new ArrayList<>();
+        List<Map<String, Object>> failedList = new ArrayList<>();
+
+        for (Long id : distinctIds) {
+            R result = force ? forceDeleteForward(id) : deleteForward(id);
+            if (result.getCode() == 0) {
+                successIds.add(id);
+            } else {
+                Map<String, Object> failed = new HashMap<>();
+                failed.put("id", id);
+                failed.put("reason", result.getMsg());
+                failedList.add(failed);
+            }
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("total", distinctIds.size());
+        data.put("successIds", successIds);
+        data.put("failed", failedList);
+
+        if (failedList.isEmpty()) {
+            return R.ok(data);
+        }
+
+        // ha-min: 全部失败时也返回明细结构（而非纯错误），便于前端区分展示失败原因
+        R res = R.err("部分或全部转发删除失败");
+        res.setData(data);
+        return res;
+    }
+
     /**
      * 改变转发状态（暂停/恢复）
      */

@@ -5,6 +5,7 @@ import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.entity.Forward;
 import com.baomidou.mybatisplus.extension.service.IService;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -78,6 +79,14 @@ public interface ForwardService extends IService<Forward> {
      * @return 更新结果
      */
     R updateForwardOrder(Map<String, Object> params);
+
+    /**
+     * 批量删除端口转发
+     * @param ids 转发ID列表
+     * @param force 是否强制删除（跳过GOST节点验证）
+     * @return 结果：data 包含 total/successIds/failed 明细
+     */
+    R deleteForwards(List<Long> ids, boolean force);
 
 
     void updateForwardA(Forward forward);

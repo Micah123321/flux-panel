@@ -239,4 +239,7 @@ go-gost/gost.json
 gitee/
 
 
+.helloagents/**
 
+.npm-cache/**
+.pnpm-store/**

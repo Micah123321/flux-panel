@@ -8,6 +8,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@herou
 import { Chip } from "@heroui/chip";
 import { Spinner } from "@heroui/spinner";
 import { Switch } from "@heroui/switch";
+import { Checkbox } from "@heroui/checkbox";
 import { Alert } from "@heroui/alert";
 import { Accordion, AccordionItem } from "@heroui/accordion";
 import toast from 'react-hot-toast';
@@ -38,6 +39,7 @@ import {
   updateForward, 
   deleteForward,
   forceDeleteForward,
+  batchDeleteForwards,
   userTunnel, 
   pauseForwardService,
   resumeForwardService,
@@ -161,6 +163,13 @@ export default function ForwardPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
+  // 批量删除相关状态
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedForwardIds, setSelectedForwardIds] = useState<Set<number>>(new Set());
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [tunnelDeleteModalOpen, setTunnelDeleteModalOpen] = useState(false);
+  const [tunnelGroupToDelete, setTunnelGroupToDelete] = useState<{ tunnelId: number; tunnelName: string; count: number } | null>(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = useState<Forward | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
   const [addressModalTitle, setAddressModalTitle] = useState('');
@@ -509,6 +518,156 @@ export default function ForwardPage() {
     }
   };
 
+  // ========== 批量删除相关 ==========
+
+  // 进入/退出批量管理模式
+  const toggleBatchMode = () => {
+    setBatchMode(prev => !prev);
+    setSelectedForwardIds(new Set());
+  };
+
+  // 切换单个转发选中状态
+  const toggleForwardSelection = (id: number) => {
+    setSelectedForwardIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // 全选/取消全选（当前列表内全部转发）
+  const toggleSelectAll = () => {
+    setSelectedForwardIds(prev => {
+      if (prev.size === forwards.length) {
+        return new Set();
+      }
+      return new Set(forwards.map(f => f.id));
+    });
+  };
+
+  // 确认批量删除
+  const confirmBatchDelete = async () => {
+    if (selectedForwardIds.size === 0) return;
+
+    setBatchDeleteLoading(true);
+    try {
+      const ids = Array.from(selectedForwardIds);
+      const res = await batchDeleteForwards(ids, false);
+      const data = res.data || {};
+      const successIds: number[] = data.successIds || [];
+      const failedItems: Array<{ id: number; reason: string }> = data.failed || [];
+
+      if (res.code === 0) {
+        toast.success(`批量删除成功（${successIds.length} 项）`);
+        setBatchDeleteModalOpen(false);
+        setSelectedForwardIds(new Set());
+        setBatchMode(false);
+        loadData();
+      } else if (successIds.length > 0) {
+        // 部分失败：询问是否对失败项强制删除
+        const confirmed = window.confirm(`成功删除 ${successIds.length} 项，${failedItems.length} 项失败。\n\n是否对失败项执行强制删除？\n\n⚠️ 注意：强制删除不会去验证节点端是否已经删除对应的转发服务。`);
+        if (confirmed) {
+          const forceIds = failedItems.map(item => item.id);
+          const forceRes = await batchDeleteForwards(forceIds, true);
+          const forceData = forceRes.data || {};
+          const forceOk: number[] = forceData.successIds || [];
+          const forceFailed: Array<{ id: number; reason: string }> = forceData.failed || [];
+          if (forceFailed.length === 0) {
+            toast.success(`强制删除成功（${forceOk.length} 项）`);
+            setBatchDeleteModalOpen(false);
+            setSelectedForwardIds(new Set());
+            setBatchMode(false);
+          } else {
+            toast.error(`强制删除后仍有 ${forceFailed.length} 项失败`);
+          }
+          loadData();
+        } else {
+          toast.error(`批量删除：成功 ${successIds.length} 项，失败 ${failedItems.length} 项`);
+          loadData();
+        }
+      } else {
+        // 全部失败
+        const confirmed = window.confirm(`批量删除全部失败（${failedItems.length} 项）。\n\n是否执行强制删除？\n\n⚠️ 注意：强制删除不会去验证节点端是否已经删除对应的转发服务。`);
+        if (confirmed) {
+          const forceIds = failedItems.map(item => item.id);
+          const forceRes = await batchDeleteForwards(forceIds, true);
+          const forceData = forceRes.data || {};
+          const forceOk: number[] = forceData.successIds || [];
+          const forceFailed: Array<{ id: number; reason: string }> = forceData.failed || [];
+          if (forceFailed.length === 0) {
+            toast.success(`强制删除成功（${forceOk.length} 项）`);
+            setBatchDeleteModalOpen(false);
+            setSelectedForwardIds(new Set());
+            setBatchMode(false);
+          } else {
+            toast.error(`强制删除后仍有 ${forceFailed.length} 项失败`);
+          }
+          loadData();
+        }
+      }
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      toast.error('批量删除失败');
+    } finally {
+      setBatchDeleteLoading(false);
+    }
+  };
+
+  // 显示隧道分组删除确认
+  const handleTunnelGroupDelete = (tunnelId: number, tunnelName: string, count: number) => {
+    setTunnelGroupToDelete({ tunnelId, tunnelName, count });
+    setTunnelDeleteModalOpen(true);
+  };
+
+  // 确认删除隧道分组下全部转发
+  const confirmTunnelGroupDelete = async () => {
+    if (!tunnelGroupToDelete) return;
+
+    setBatchDeleteLoading(true);
+    try {
+      const ids = forwards
+        .filter(f => f.tunnelId === tunnelGroupToDelete.tunnelId)
+        .map(f => f.id);
+      if (ids.length === 0) {
+        toast.error('该隧道下没有可删除的转发');
+        setTunnelDeleteModalOpen(false);
+        return;
+      }
+
+      const res = await batchDeleteForwards(ids, false);
+      const data = res.data || {};
+      const successIds: number[] = data.successIds || [];
+      const failedItems: Array<{ id: number; reason: string }> = data.failed || [];
+
+      if (res.code === 0) {
+        toast.success(`已删除隧道"${tunnelGroupToDelete.tunnelName}"下全部 ${successIds.length} 个转发`);
+        setTunnelDeleteModalOpen(false);
+        loadData();
+      } else if (successIds.length > 0) {
+        const confirmed = window.confirm(`成功删除 ${successIds.length} 项，${failedItems.length} 项失败。\n\n是否对失败项执行强制删除？\n\n⚠️ 注意：强制删除不会去验证节点端是否已经删除对应的转发服务。`);
+        if (confirmed) {
+          const forceIds = failedItems.map(item => item.id);
+          const forceRes = await batchDeleteForwards(forceIds, true);
+          const forceData = forceRes.data || {};
+          const forceFailed: Array<{ id: number; reason: string }> = forceData.failed || [];
+          toast.success(forceFailed.length === 0 ? '强制删除成功' : `强制删除后仍有 ${forceFailed.length} 项失败`);
+          setTunnelDeleteModalOpen(false);
+          loadData();
+        }
+      } else {
+        toast.error(failedItems[0]?.reason || '删除失败');
+      }
+    } catch (error) {
+      console.error('隧道分组删除失败:', error);
+      toast.error('删除失败');
+    } finally {
+      setBatchDeleteLoading(false);
+    }
+  };
   // 处理隧道选择变化
   const handleTunnelChange = (tunnelId: string) => {
     const tunnel = tunnels.find(t => t.id === parseInt(tunnelId));
@@ -1181,12 +1340,21 @@ export default function ForwardPage() {
       <Card key={forward.id} className="group shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
         <CardHeader className="pb-2">
           <div className="flex justify-between items-start w-full">
+            {batchMode && (
+              <Checkbox
+                size="sm"
+                className="mr-2 mt-0.5"
+                isSelected={selectedForwardIds.has(forward.id)}
+                onValueChange={() => toggleForwardSelection(forward.id)}
+                aria-label="选择该转发"
+              />
+            )}
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-foreground truncate text-sm">{forward.name}</h3>
               <p className="text-xs text-default-500 truncate">{forward.tunnelName}</p>
             </div>
             <div className="flex items-center gap-1.5 ml-2">
-              {viewMode === 'direct' && (
+              {viewMode === 'direct' && !batchMode && (
                 <div 
                   className={`cursor-grab active:cursor-grabbing p-2 text-default-400 hover:text-default-600 transition-colors touch-manipulation ${
                     isMobile 
@@ -1411,10 +1579,60 @@ export default function ForwardPage() {
             >
               新增
             </Button>
+
+            {/* 批量管理按钮 */}
+            <Button
+              size="sm"
+              variant="flat"
+              color={batchMode ? "danger" : "secondary"}
+              onPress={toggleBatchMode}
+            >
+              {batchMode ? "退出批量" : "批量管理"}
+            </Button>
             
         
           </div>
         </div>
+
+        {/* 批量模式：全选栏 */}
+        {batchMode && (
+          <div className="flex items-center justify-between mb-4 px-4 py-2.5 bg-default-50 dark:bg-default-100/40 rounded-lg border border-divider">
+            <Checkbox
+              size="sm"
+              isSelected={forwards.length > 0 && selectedForwardIds.size === forwards.length}
+              isIndeterminate={selectedForwardIds.size > 0 && selectedForwardIds.size < forwards.length}
+              onValueChange={toggleSelectAll}
+            >
+              <span className="text-sm">全选（{forwards.length} 项）</span>
+            </Checkbox>
+            <span className="text-small text-default-500">已选 {selectedForwardIds.size} 项</span>
+          </div>
+        )}
+
+        {/* 批量模式：底部悬浮操作条 */}
+        {batchMode && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-content1 rounded-large shadow-lg border border-divider">
+            <span className="text-sm text-default-600">已选 <span className="font-semibold text-foreground">{selectedForwardIds.size}</span> 项</span>
+            <Button
+              size="sm"
+              color="danger"
+              variant="flat"
+              isDisabled={selectedForwardIds.size === 0}
+              onPress={() => setBatchDeleteModalOpen(true)}
+              startContent={
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clipRule="evenodd" />
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 012 0v4a1 1 0 11-2 0V7zM12 7a1 1 0 012 0v4a1 1 0 11-2 0V7z" clipRule="evenodd" />
+                </svg>
+              }
+            >
+              批量删除
+            </Button>
+            <Button size="sm" variant="light" onPress={toggleBatchMode}>
+              取消
+            </Button>
+          </div>
+        )}
 
 
         {/* 根据显示模式渲染不同内容 */}
@@ -1468,6 +1686,22 @@ export default function ForwardPage() {
                                 <Chip variant="flat" size="sm" className="text-xs">
                                   {tunnelGroup.forwards.filter(f => f.serviceRunning).length}/{tunnelGroup.forwards.length}
                                 </Chip>
+                                {!batchMode && (
+                                  <Button
+                                    size="sm"
+                                    variant="light"
+                                    color="danger"
+                                    isIconOnly
+                                    className="min-w-6 w-6 h-6"
+                                    title="删除该隧道下全部转发"
+                                    onPress={() => handleTunnelGroupDelete(tunnelGroup.tunnelId, tunnelGroup.tunnelName, tunnelGroup.forwards.length)}
+                                  >
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clipRule="evenodd" />
+                                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 012 0v4a1 1 0 11-2 0V7zM12 7a1 1 0 012 0v4a1 1 0 11-2 0V7z" clipRule="evenodd" />
+                                    </svg>
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           }
@@ -1709,6 +1943,72 @@ export default function ForwardPage() {
                     isLoading={deleteLoading}
                   >
                     确认删除
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 批量删除确认弹窗 */}
+        <Modal isOpen={batchDeleteModalOpen} onClose={() => setBatchDeleteModalOpen(false)} size="sm" backdrop="blur" placement="center">
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-lg font-bold text-danger">批量删除确认</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p className="text-default-600">
+                    确定要删除选中的 <span className="font-semibold text-foreground">{selectedForwardIds.size}</span> 个转发吗？
+                  </p>
+                  <p className="text-small text-default-500 mt-2">
+                    将逐个删除选中的转发（含节点端服务），此操作无法撤销。
+                  </p>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={confirmBatchDelete}
+                    isLoading={batchDeleteLoading}
+                  >
+                    确认删除
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 隧道分组删除确认弹窗 */}
+        <Modal isOpen={tunnelDeleteModalOpen} onClose={() => setTunnelDeleteModalOpen(false)} size="sm" backdrop="blur" placement="center">
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-lg font-bold text-danger">删除隧道转发</h2>
+                </ModalHeader>
+                <ModalBody>
+                  <p className="text-default-600">
+                    确定要删除隧道 <span className="font-semibold text-foreground">"{tunnelGroupToDelete?.tunnelName}"</span> 下的全部 <span className="font-semibold text-foreground">{tunnelGroupToDelete?.count}</span> 个转发吗？
+                  </p>
+                  <p className="text-small text-default-500 mt-2">
+                    将逐个删除该隧道下的所有转发（含节点端服务），此操作无法撤销。
+                  </p>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={confirmTunnelGroupDelete}
+                    isLoading={batchDeleteLoading}
+                  >
+                    全部删除
                   </Button>
                 </ModalFooter>
               </>
