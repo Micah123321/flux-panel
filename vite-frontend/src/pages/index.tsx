@@ -5,7 +5,6 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { isWebViewFunc } from '@/utils/panel';
 import { siteConfig } from '@/config/site';
 import { title } from "@/components/primitives";
 import DefaultLayout from "@/layouts/default";
@@ -53,7 +52,6 @@ export default function IndexPage() {
   const navigate = useNavigate();
   const tacInstanceRef = useRef<any>(null);
   const captchaContainerRef = useRef<HTMLDivElement>(null);
-  const [isWebView, setIsWebView] = useState(false);
   // 清理验证码实例
   useEffect(() => {
     return () => {
@@ -62,10 +60,6 @@ export default function IndexPage() {
         tacInstanceRef.current = null;
       }
     };
-  }, []);
-  // 检测是否在WebView中运行
-  useEffect(() => {
-    setIsWebView(isWebViewFunc());
   }, []);
   // 验证表单
   const validateForm = (): boolean => {

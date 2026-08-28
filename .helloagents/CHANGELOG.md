@@ -8,4 +8,5 @@
 - 将 Docker Compose 镜像切换到 GHCR latest 镜像。
 - 将 CI 改为 main 单通道构建并发布 latest release 资产。
 - 统一前端版本展示，移除 WebView 与网页的展示版本分流。
+- 修复 CI 多架构镜像构建缺少 QEMU 初始化的问题，并关闭 GOST 构建的 VCS stamping。
 - 移除后端 Java 文件中的历史作者注释和代码生成器作者配置。

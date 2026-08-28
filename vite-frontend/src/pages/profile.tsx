@@ -5,7 +5,6 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure
 import { Input } from "@heroui/input";
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { isWebViewFunc } from '@/utils/panel';
 import { siteConfig } from '@/config/site';
 import { updatePassword } from '@/api';
 import { safeLogout } from '@/utils/logout';
