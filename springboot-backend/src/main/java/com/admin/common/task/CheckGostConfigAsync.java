@@ -14,12 +14,17 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 @Slf4j
 @Service
 public class CheckGostConfigAsync {
+
+    /** 隧道转发类型，与 ForwardServiceImpl.TUNNEL_TYPE_TUNNEL_FORWARD 保持一致 */
+    private static final int TUNNEL_TYPE_TUNNEL_FORWARD = 2;
 
     @Resource
     private NodeService nodeService;
@@ -36,6 +41,10 @@ public class CheckGostConfigAsync {
     @Lazy
     private TunnelService tunnelService;
 
+    @Resource
+    @Lazy
+    private UserTunnelService userTunnelService;
+
 
 
     /**
@@ -49,6 +58,9 @@ public class CheckGostConfigAsync {
             cleanOrphanedServices(gostConfig, node);
             cleanOrphanedChains(gostConfig, node);
             cleanOrphanedLimiters(gostConfig, node);
+            // 同步数据库期望状态到节点：补建缺失的限流器与转发服务
+            syncLimiters(gostConfig, node);
+            syncMissingServices(gostConfig, node);
         }
     }
 
@@ -150,8 +162,9 @@ public class CheckGostConfigAsync {
 
     /**
      * 同步限流器
+     * 对比节点上报的限流器与数据库 speed_limit 记录，补建节点上缺失的限流器
      */
-    private void syncLimiters(GostConfigDto gostConfig, Node node) {
+    public void syncLimiters(GostConfigDto gostConfig, Node node) {
         List<Tunnel> tunnelList = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", node.getId()));
         if (tunnelList == null || tunnelList.isEmpty()) return;
         safeExecute(() -> {
@@ -195,6 +208,52 @@ public class CheckGostConfigAsync {
         }, "同步限流器 ");
     }
 
+    /**
+     * 同步缺失的转发服务
+     * 节点重装/换机后本地 gost.json 配置丢失，对比节点上报的服务与数据库 forward 记录，
+     * 通过 updateGostServices 补建缺失的服务（update 不存在时节点端自动回退为 create）。
+     * ha-min: 单节点逐条串行下发，转发数量极大时耗时较长；依赖 10 分钟配置上报周期，实时性有限。
+     */
+    private void syncMissingServices(GostConfigDto gostConfig, Node node) {
+        List<Tunnel> tunnelList = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", node.getId()));
+        if (tunnelList == null || tunnelList.isEmpty()) return;
+        safeExecute(() -> {
+            Set<String> existingServices = new HashSet<>();
+            if (gostConfig.getServices() != null) {
+                for (ConfigItem service : gostConfig.getServices()) {
+                    existingServices.add(service.getName());
+                }
+            }
+            for (Tunnel tunnel : tunnelList) {
+                List<Forward> forwardList = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnel.getId()));
+                if (forwardList == null || forwardList.isEmpty()) continue;
+                for (Forward forward : forwardList) {
+                    // 只重建启用状态的转发；暂停/异常转发保持原状
+                    if (forward.getStatus() == null || forward.getStatus() != 1) continue;
+                    // getOne 第二参数 false：数据异常存在重复授权行时取首条，不中断整个节点的同步
+                    UserTunnel userTunnel = userTunnelService.getOne(
+                            new QueryWrapper<UserTunnel>().eq("user_id", forward.getUserId()).eq("tunnel_id", tunnel.getId()), false);
+                    String serviceName = buildServiceName(forward, userTunnel);
+                    boolean tcpExists = existingServices.contains(serviceName + "_tcp");
+                    boolean udpExists = existingServices.contains(serviceName + "_udp");
+                    boolean tlsExists = existingServices.contains(serviceName + "_tls");
+                    if (tcpExists && udpExists && (tunnel.getType() == null || tunnel.getType() != TUNNEL_TYPE_TUNNEL_FORWARD || tlsExists)) {
+                        continue;
+                    }
+                    // 缺失任一服务则整组重建
+                    forwardService.updateForwardA(forward);
+                }
+            }
+        }, "同步缺失服务 ");
+    }
+
+    /**
+     * 构建转发服务名，与 ForwardServiceImpl.buildServiceName 保持一致
+     */
+    private String buildServiceName(Forward forward, UserTunnel userTunnel) {
+        int userTunnelId = (userTunnel != null) ? userTunnel.getId() : 0;
+        return forward.getId() + "_" + forward.getUserId() + "_" + userTunnelId;
+    }
     /**
      * 安全执行操作，捕获异常
      */

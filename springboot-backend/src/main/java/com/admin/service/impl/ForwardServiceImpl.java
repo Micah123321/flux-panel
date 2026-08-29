@@ -1552,7 +1552,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } else {
             limiter = userTunnel.getSpeedId();
         }
-        updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel);
+        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel);
+        if (result.getCode() != 0) {
+            log.warn("重建转发 {} 的Gost服务失败: {}", forward.getId(), result.getMsg());
+        }
     }
 
 

@@ -60,6 +60,15 @@
   强制删除；结果以 toast 汇报成功/失败数量。
 - API 封装：`api/index.ts` 的 `batchDeleteForwards(ids, force)`。
 
+## 节点配置自动同步（2026-08-30 新增）
+
+- 背景：节点服务/链/限速器存放在节点本地 `gost.json`，节点换机或重装后本地配置全部丢失，面板此前只做单向清理。
+- 触发：节点每 10 分钟向 `/flow/config` 上报当前配置（`StartConfigReporter`），面板 `CheckGostConfigAsync.cleanNodeConfigs` 处理。
+- 限流器：`syncLimiters`（已恢复调用）对比数据库 `speed_limit` 与上报 limiters，缺失的通过 `updateSpeedLimit` 补建（节点端 Update 不存在时面板回退 Add）。
+- 转发服务：`syncMissingServices` 查询以该节点为入口的隧道下的启用转发，对比上报服务名（`_tcp`/`_udp`，隧道转发另查 `_tls`），缺失任一即调用 `ForwardService.updateForwardA` 整组重建；暂停/异常转发不重建。
+- 顺序保证：清理孤立配置在前、补建在后，同一次上报内完成；`updateForwardA` 重建失败仅记 warn 日志，等待下次上报重试。
+- ha-min: 同步串行执行且依赖 10 分钟上报周期，节点转发数量极大时收敛较慢；需要实时性时可另行增加手动触发入口。
+
 ## 已知限制
 - 批量新增和批量删除都逐条处理不引入事务边界（与单条操作语义一致；GOST+DB 两步本身非原子），
   部分失败时已成功项不回滚，通过 success/failed 或 successIds/failed 明细告知前端。
