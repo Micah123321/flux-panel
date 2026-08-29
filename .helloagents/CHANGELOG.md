@@ -2,6 +2,12 @@
 
 ## 2026-08-30
 
+- 修复 Docker 前端镜像构建失败：CI `npm ci` 报 `Missing: driver.js@1.8.0 from lock file`（EUSAGE）。根因：新增新手引导功能时 `driver.js` 仅写入 `vite-frontend/package.json`，本地用 pnpm 验证构建（pnpm 不维护 `package-lock.json`），而 Docker 构建走 `npm ci` 严格校验两文件同步。修复：向 `vite-frontend/package-lock.json` 补录根依赖区 `"driver.js": "^1.8.0"` 与 `packages["node_modules/driver.js"]` 完整条目（1.8.0 / registry resolved / sha512 integrity / MIT）；全量比对确认 `package.json` 与 lock 根 manifest 其余依赖完全同步（共 946 包，无其他失步项）。
+
+## 2026-08-30（多主控）
+
+- 新增单节点多主控：节点端（go-gost 3.2.0）支持同时接入多个面板，每个主控独立 WebSocket 命令通道与 HTTP 流量/配置上报通道；新增 `nameshift` 命名空间包（p2/p3… 前缀翻译、流量按服务名路由、配置上报逐面板视图过滤），面板侧零改动。`config.json` 升级为 `servers` 数组（旧格式自动迁移，顶层 addr/secret 保留为首主控镜像，旧版二进制可读）；`install.sh` 重跑即追加/更新主控，新增添加/移除/查看主控菜单（jq→python3 降级）。已知边界：`SetProtocol`（http/tls/socks 屏蔽）为节点全局开关，多主控下后设置者生效。验证：`go build ./...`（root+x）、`go test ./internal/util/nameshift/`（4 用例）、`bash -n install.sh` 通过；未触碰 springboot-backend/vite-frontend。
+- README 特性清单补充「单节点多主控」。
 - 新增新手引导系统：`/guide` 使用向导页（管理员部署 7 步 / 用户上手 3 步，步骤实时调用接口检测完成状态），导航栏新增「使用向导」入口，仪表板按角色在首次登录时弹出引导卡片（localStorage 记忆，可关闭）；商店页与转发页接入 driver.js 首访气泡引导。
 - 商业化体验打磨：购买改为支付模态框并每 3 秒轮询订单状态（最长 5 分钟），到账自动提示并刷新；新增邀请余额抵扣下单（`order_record.invite_deduction` 落库 + 安装脚本幂等迁移），抵扣后全额覆盖时订单直接完成发放，四渠道支付金额改为应付减抵扣的净额；邀请返现奖励基数同步改为实付口径（无抵扣时行为不变）。
 - 重构 `commerce-admin.tsx`（30.9KB 单文件）为 `commerce-admin/` 目录：骨架 + 常量 + 套餐/分组/兑换码/订单/支付/邀请六个子组件，状态下放各分区。

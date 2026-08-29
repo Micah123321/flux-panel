@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-gost/x/config"
 	"github.com/go-gost/x/internal/util/crypto"
+	"github.com/go-gost/x/internal/util/nameshift"
 	"github.com/go-gost/x/service"
 	"github.com/gorilla/websocket"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -100,6 +101,7 @@ type WebSocketReporter struct {
 	connecting     bool              // 新增：正在连接状态
 	connMutex      sync.Mutex        // 新增：连接状态锁
 	aesCrypto      *crypto.AESCrypto // 新增：AES加密器
+	ns             string            // 本面板命名空间前缀（p2/p3…，空为无前缀主控）
 }
 
 // NewWebSocketReporter 创建一个新的WebSocket报告器
@@ -501,6 +503,9 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 	// 传递 requestId
 	response.RequestId = cmd.RequestId
 
+	// 多主控命名空间：为本面板下发的命令载荷统一加服务名前缀（幂等，web_api 除外）
+	cmd.Data = nameshift.PrefixPayload(w.ns, cmd.Data)
+
 	switch cmd.Type {
 	// Service 相关命令
 	case "AddService":
@@ -843,17 +848,28 @@ func (w *WebSocketReporter) handleSetProtocol(data interface{}) error {
 	return nil
 }
 
-// updateLocalConfigJSON 将 http/tls/socks 写入工作目录下的 config.json
+// localServerConfig 与主包 ServerConfig 结构保持一致，避免循环依赖。
+// 多主控下 http/tls/socks 屏蔽为节点全局开关，后设置的主控生效。
+// ha-min: 与主包 config.go 手工同步，字段变更时需两处同时修改。
+type localServerConfig struct {
+	Addr   string `json:"addr"`
+	Secret string `json:"secret"`
+	Ns     string `json:"ns,omitempty"`
+}
+
+// updateLocalConfigJSON 将 http/tls/socks 写入工作目录下的 config.json，
+// 保留 servers 多主控数组，并同步顶层 addr/secret 镜像，保证旧版二进制可读。
 func updateLocalConfigJSON(httpVal int, tlsVal int, socksVal int) error {
 	path := "config.json"
 
 	// 读取现有配置
 	type LocalConfig struct {
-		Addr   string `json:"addr"`
-		Secret string `json:"secret"`
-		Http   int    `json:"http"`
-		Tls    int    `json:"tls"`
-		Socks  int    `json:"socks"`
+		Addr    string              `json:"addr"`
+		Secret  string              `json:"secret"`
+		Http    int                 `json:"http"`
+		Tls     int                 `json:"tls"`
+		Socks   int                 `json:"socks"`
+		Servers []localServerConfig `json:"servers,omitempty"`
 	}
 
 	var cfg LocalConfig
@@ -861,9 +877,20 @@ func updateLocalConfigJSON(httpVal int, tlsVal int, socksVal int) error {
 		_ = json.Unmarshal(b, &cfg)
 	}
 
+	// 旧格式迁移
+	if len(cfg.Servers) == 0 && cfg.Addr != "" {
+		cfg.Servers = []localServerConfig{{Addr: cfg.Addr, Secret: cfg.Secret}}
+	}
+
 	cfg.Http = httpVal
 	cfg.Tls = tlsVal
 	cfg.Socks = socksVal
+
+	// 保持顶层镜像与首主控一致
+	if len(cfg.Servers) > 0 {
+		cfg.Addr = cfg.Servers[0].Addr
+		cfg.Secret = cfg.Servers[0].Secret
+	}
 
 	// 写回
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -1052,6 +1079,23 @@ func StartWebSocketReporterWithConfig(addr string, secret string, http int, tls 
 	reporter.addr = addr
 	reporter.secret = secret
 	reporter.version = version
+	reporter.Start()
+	return reporter
+}
+
+// StartWebSocketReporterFor 按命名空间启动一个面板专属 reporter。
+// ns 为空表示无前缀主控（兼容旧版单主控行为）。
+func StartWebSocketReporterFor(addr string, secret string, ns string, http int, tls int, socks int, version string) *WebSocketReporter {
+	fullURL := "ws://" + addr + "/system-info?type=1&secret=" + secret + "&version=" + version +
+		"&http=" + strconv.Itoa(http) + "&tls=" + strconv.Itoa(tls) + "&socks=" + strconv.Itoa(socks)
+
+	fmt.Printf("🔗 WebSocket连接URL: %s (ns: %s)\n", addr, ns)
+
+	reporter := NewWebSocketReporter(fullURL, secret)
+	reporter.addr = addr
+	reporter.secret = secret
+	reporter.version = version
+	reporter.ns = ns
 	reporter.Start()
 	return reporter
 }

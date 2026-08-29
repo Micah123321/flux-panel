@@ -24,6 +24,7 @@ type stringList []string
 func (l *stringList) String() string {
 	return fmt.Sprintf("%s", *l)
 }
+
 func (l *stringList) Set(value string) error {
 	*l = append(*l, value)
 	return nil
@@ -106,7 +107,7 @@ func init() {
 }
 
 func main() {
-	// 加载配置文件
+	// 加载配置文件（旧版单主控格式自动迁移为多主控 servers 数组）
 	config, err := LoadConfig("config.json")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 配置加载失败: %v\n", err)
@@ -114,14 +115,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("✅ 配置加载成功 - addr: %s\n", config.Addr)
+	fmt.Printf("✅ 配置加载成功 - 已接入 %d 个主控\n", len(config.Servers))
+	for i, s := range config.Servers {
+		ns := s.Ns
+		if ns == "" {
+			ns = "(无前缀)"
+		}
+		fmt.Printf("  主控[%d] addr: %s ns: %s\n", i+1, s.Addr, ns)
+	}
 
 	log := xlogger.NewLogger()
 	logger.SetDefault(log)
 
-	wsReporter := socket.StartWebSocketReporterWithConfig(config.Addr, config.Secret, config.Http, config.Tls, config.Socks, "1.2.4")
-	defer wsReporter.Stop()
-	service.SetHTTPReportURL(config.Addr, config.Secret)
+	// 为每个主控启动独立的 WebSocket reporter 与流量/配置上报目标；
+	// 首个主控沿用顶层协议屏蔽开关作为初始 http/tls/socks 参数。
+	for _, s := range config.Servers {
+		wsReporter := socket.StartWebSocketReporterFor(s.Addr, s.Secret, s.Ns,
+			config.Http, config.Tls, config.Socks, version)
+		defer wsReporter.Stop()
+		service.AddReportTarget(s.Addr, s.Secret, s.Ns)
+	}
 
 	p := &program{}
 	if err := svc.Run(p); err != nil {

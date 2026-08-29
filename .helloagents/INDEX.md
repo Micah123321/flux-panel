@@ -9,9 +9,11 @@
 
 - [模块索引](modules/_index.md)
 - [管理员数据视图](modules/admin-dashboard.md)
+- [单节点多主控](modules/multi-master-node.md)
 - [维护与发布通道](modules/release-maintenance.md)
 
 ## 方案包
 
 - [仓库归属与发布通道整理](plan/202608280000_repo-maintenance/tasks.md)
 - [移除 Android / iOS 原生客户端](plan/202608292159_remove-native-apps/tasks.md)
+- [单节点多主控](plan/202608292300_multi-master-node/tasks.md)
