@@ -43,6 +43,9 @@ public class CommerceDto {
         @Min(value = 0, message = "流量不能小于0")
         private Long flow;
 
+        @Min(value = 0, message = "每日流量限制不能小于0")
+        private Long dailyFlow;
+
         @NotNull(message = "最大规则数不能为空")
         @Min(value = 0, message = "最大规则数不能小于0")
         private Integer maxRules;
@@ -125,6 +128,8 @@ public class CommerceDto {
 
         @NotBlank(message = "支付方式不能为空")
         private String paymentChannel;
+
+        private Boolean useInviteBalance;
     }
 
     @Data

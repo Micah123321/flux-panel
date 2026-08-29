@@ -38,6 +38,15 @@ public class UserTunnel implements Serializable {
 
     private Long outFlow;
 
+    /** 每日流量限制（GiB），0=不限制 */
+    private Long dailyFlow;
+
+    /** 今日已用入站流量（字节） */
+    private Long dailyInFlow;
+
+    /** 今日已用出站流量（字节） */
+    private Long dailyOutFlow;
+
     private Long flowResetTime;
 
     private Long expTime;

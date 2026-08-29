@@ -304,6 +304,17 @@ public class FlowController extends BaseController {
             return;
         }
 
+        // 检查用户每日流量限制（daily_flow 为 0 表示不限制）
+        if (updatedUser.getDailyFlow() != null && updatedUser.getDailyFlow() > 0) {
+            long userDailyLimit = updatedUser.getDailyFlow() * BYTES_TO_GB;
+            long userDailyUsed = (updatedUser.getDailyInFlow() == null ? 0L : updatedUser.getDailyInFlow())
+                    + (updatedUser.getDailyOutFlow() == null ? 0L : updatedUser.getDailyOutFlow());
+            if (userDailyLimit < userDailyUsed) {
+                pauseAllUserServices(userId, name);
+                return;
+            }
+        }
+
         // 检查用户到期时间
         if (updatedUser.getExpTime() != null && updatedUser.getExpTime() <= new Date().getTime()) {
             pauseAllUserServices(userId, name);
@@ -329,6 +340,17 @@ public class FlowController extends BaseController {
         if (flow >= userTunnel.getFlow() *  BYTES_TO_GB) {
             pauseSpecificForward(userTunnel.getTunnelId(), name, userId);
             return;
+        }
+
+        // 检查隧道每日流量限制（daily_flow 为 0 表示不限制）
+        if (userTunnel.getDailyFlow() != null && userTunnel.getDailyFlow() > 0) {
+            long tunnelDailyLimit = userTunnel.getDailyFlow() * BYTES_TO_GB;
+            long tunnelDailyUsed = (userTunnel.getDailyInFlow() == null ? 0L : userTunnel.getDailyInFlow())
+                    + (userTunnel.getDailyOutFlow() == null ? 0L : userTunnel.getDailyOutFlow());
+            if (tunnelDailyUsed >= tunnelDailyLimit) {
+                pauseSpecificForward(userTunnel.getTunnelId(), name, userId);
+                return;
+            }
         }
 
         if (userTunnel.getExpTime() != null && userTunnel.getExpTime() <= System.currentTimeMillis()) {
@@ -396,6 +418,8 @@ public class FlowController extends BaseController {
             updateWrapper.eq("id", forwardId);
             updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
             updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
+            updateWrapper.setSql("daily_in_flow = daily_in_flow + " + flowStats.getD());
+            updateWrapper.setSql("daily_out_flow = daily_out_flow + " + flowStats.getU());
 
             forwardService.update(null, updateWrapper);
         }
@@ -409,6 +433,8 @@ public class FlowController extends BaseController {
 
             updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
             updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
+            updateWrapper.setSql("daily_in_flow = daily_in_flow + " + flowStats.getD());
+            updateWrapper.setSql("daily_out_flow = daily_out_flow + " + flowStats.getU());
 
             userService.update(null, updateWrapper);
         }
@@ -425,6 +451,8 @@ public class FlowController extends BaseController {
             updateWrapper.eq("id", userTunnelId);
             updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
             updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
+            updateWrapper.setSql("daily_in_flow = daily_in_flow + " + flowStats.getD());
+            updateWrapper.setSql("daily_out_flow = daily_out_flow + " + flowStats.getU());
             userTunnelService.update(null, updateWrapper);
         }
     }

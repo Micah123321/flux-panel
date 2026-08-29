@@ -43,6 +43,9 @@ public class UserPackageDto {
         private Long flow;           // 总流量配额(GB)
         private Long inFlow;         // 已用入站流量(字节)
         private Long outFlow;        // 已用出站流量(字节)
+        private Long dailyFlow;      // 每日流量限制(GB)，0=不限制
+        private Long dailyInFlow;    // 今日已用入站流量(字节)
+        private Long dailyOutFlow;   // 今日已用出站流量(字节)
         private Integer num;         // 转发数量配额
         private Long expTime;        // 过期时间
         private Long flowResetTime;  // 流量重置时间

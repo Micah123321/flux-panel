@@ -540,6 +540,7 @@ public class CommerceServiceImpl implements CommerceService {
         plan.setDurationMultiplier(request.getDurationMultiplier());
         plan.setUserGroupId(request.getUserGroupId());
         plan.setFlow(request.getFlow());
+        plan.setDailyFlow(request.getDailyFlow() == null ? 0L : request.getDailyFlow());
         plan.setMaxRules(request.getMaxRules());
         plan.setSpeedMbps(request.getSpeedMbps() == null ? 0 : request.getSpeedMbps());
         plan.setIpLimit(request.getIpLimit() == null ? 0 : request.getIpLimit());
@@ -651,6 +652,9 @@ public class CommerceServiceImpl implements CommerceService {
         user.setPackagePlanId(plan.getId());
         user.setUserGroupId(plan.getUserGroupId());
         user.setFlow(plan.getFlow());
+        user.setDailyFlow(plan.getDailyFlow());
+        user.setDailyInFlow(0L);
+        user.setDailyOutFlow(0L);
         user.setInFlow(0L);
         user.setOutFlow(0L);
         user.setNum(plan.getMaxRules());
@@ -684,6 +688,9 @@ public class CommerceServiceImpl implements CommerceService {
                 userTunnel.setOutFlow(0L);
             }
             userTunnel.setFlow(plan.getFlow());
+            userTunnel.setDailyFlow(plan.getDailyFlow());
+            userTunnel.setDailyInFlow(0L);
+            userTunnel.setDailyOutFlow(0L);
             userTunnel.setNum(plan.getMaxRules());
             userTunnel.setFlowResetTime(user.getFlowResetTime());
             userTunnel.setExpTime(expTime);

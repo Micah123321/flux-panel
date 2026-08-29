@@ -18,6 +18,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import javax.annotation.Resource;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -37,6 +38,8 @@ public class ResetFlowAsync {
 
     @Resource
     TunnelService tunnelService;
+
+    private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
 
     /**
      * 每天0点执行流量重置任务
@@ -66,6 +69,12 @@ public class ResetFlowAsync {
             // 重置用户隧道流量
             resetUserTunnelFlow(currentDay, lastDayOfMonth);
             
+            // 重置每日流量计数（每日流量限制固定每天0点重新计数）
+            // ha-min: 在清零前捕获"已超日限"的转发作为恢复候选集，避免误恢复手动暂停的转发；
+            // 升级路径: 为转发增加暂停原因字段后可精确区分
+            List<Forward> dailyResumeCandidates = findDailyOverLimitForwards();
+            resetDailyFlow();
+            
             log.info("流量重置任务执行完成");
 
 
@@ -74,6 +83,9 @@ public class ResetFlowAsync {
 
             // 处理过期隧道
             userTunnel();
+
+            // 恢复因每日流量超限而暂停的转发
+            resumeDailyLimitedForwards(dailyResumeCandidates);
 
             log.info("到期任务执行完成");
             
@@ -187,6 +199,111 @@ public class ResetFlowAsync {
         } catch (Exception e) {
             log.info("重置用户隧道流量失败", e);
         }
+    }
+
+    /**
+     * 重置每日流量计数（每天0点全表清零）
+     * 每日流量限制与月度流量重置（flow_reset_time）机制无关，固定每天0点重新计数
+     */
+    private void resetDailyFlow() {
+        try {
+            UpdateWrapper<User> userWrapper = new UpdateWrapper<>();
+            userWrapper.setSql("daily_in_flow = 0, daily_out_flow = 0");
+            userService.update(null, userWrapper);
+
+            UpdateWrapper<UserTunnel> userTunnelWrapper = new UpdateWrapper<>();
+            userTunnelWrapper.setSql("daily_in_flow = 0, daily_out_flow = 0");
+            userTunnelService.update(null, userTunnelWrapper);
+
+            log.info("每日流量计数已全部清零");
+        } catch (Exception e) {
+            log.info("重置每日流量计数失败", e);
+        }
+    }
+
+    /**
+     * 查找"已超每日流量限制"的转发（用户或隧道任一维度超日限），作为重置后的恢复候选集
+     */
+    private List<Forward> findDailyOverLimitForwards() {
+        List<Forward> pausedForwards = forwardService.list(new QueryWrapper<Forward>().eq("status", 0));
+        List<Forward> candidates = new ArrayList<>();
+        for (Forward forward : pausedForwards) {
+            User user = userService.getById(forward.getUserId());
+            if (user == null) continue;
+            UserTunnel userTunnel = userTunnelService.getOne(new QueryWrapper<UserTunnel>()
+                    .eq("user_id", forward.getUserId()).eq("tunnel_id", forward.getTunnelId()));
+            if (userTunnel == null) continue;
+
+            boolean userDailyOver = user.getDailyFlow() != null && user.getDailyFlow() > 0
+                    && user.getDailyInFlow() != null && user.getDailyOutFlow() != null
+                    && (user.getDailyInFlow() + user.getDailyOutFlow()) >= user.getDailyFlow() * BYTES_TO_GB;
+            boolean tunnelDailyOver = userTunnel.getDailyFlow() != null && userTunnel.getDailyFlow() > 0
+                    && userTunnel.getDailyInFlow() != null && userTunnel.getDailyOutFlow() != null
+                    && (userTunnel.getDailyInFlow() + userTunnel.getDailyOutFlow()) >= userTunnel.getDailyFlow() * BYTES_TO_GB;
+            if (userDailyOver || tunnelDailyOver) candidates.add(forward);
+        }
+        return candidates;
+    }
+
+    /**
+     * 恢复因每日流量超限而暂停的转发
+     * 仅处理重置前已超日限的候选转发，且恢复前重新校验全部限额与状态条件；
+     * 用户手动暂停、月度流量超限、到期等原因暂停的转发不会被误恢复。
+     */
+    private void resumeDailyLimitedForwards(List<Forward> candidates) {
+        try {
+            if (candidates.isEmpty()) return;
+
+            int resumed = 0;
+            for (Forward forward : candidates) {
+                User user = userService.getById(forward.getUserId());
+                if (user == null) continue;
+
+                UserTunnel userTunnel = userTunnelService.getOne(new QueryWrapper<UserTunnel>()
+                        .eq("user_id", forward.getUserId()).eq("tunnel_id", forward.getTunnelId()));
+                if (userTunnel == null) continue;
+
+                if (!isForwardAllowed(user, userTunnel)) continue;
+
+                Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+                if (tunnel == null) continue;
+
+                String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel.getId());
+                GostUtil.ResumeService(tunnel.getInNodeId(), serviceName);
+                if (tunnel.getType() == 2) {
+                    GostUtil.ResumeRemoteService(tunnel.getOutNodeId(), serviceName);
+                }
+                forward.setStatus(1);
+                forwardService.updateById(forward);
+                resumed++;
+            }
+            log.info("每日流量重置后恢复转发 {} 条", resumed);
+        } catch (Exception e) {
+            log.info("恢复每日流量超限转发失败", e);
+        }
+    }
+
+    /**
+     * 判断用户与隧道两个维度是否都允许转发运行（限额未超、未到期、状态正常）
+     */
+    private boolean isForwardAllowed(User user, UserTunnel userTunnel) {
+        long now = System.currentTimeMillis();
+        if (user.getStatus() == null || user.getStatus() != 1) return false;
+        if (user.getExpTime() != null && user.getExpTime() <= now) return false;
+        if (user.getFlow() != null && user.getInFlow() != null && user.getOutFlow() != null
+                && (user.getInFlow() + user.getOutFlow()) >= user.getFlow() * BYTES_TO_GB) return false;
+        if (user.getDailyFlow() != null && user.getDailyFlow() > 0
+                && user.getDailyInFlow() != null && user.getDailyOutFlow() != null
+                && (user.getDailyInFlow() + user.getDailyOutFlow()) >= user.getDailyFlow() * BYTES_TO_GB) return false;
+
+        if (userTunnel.getStatus() == null || userTunnel.getStatus() != 1) return false;
+        if (userTunnel.getExpTime() != null && userTunnel.getExpTime() <= now) return false;
+        if (userTunnel.getFlow() != null && userTunnel.getInFlow() != null && userTunnel.getOutFlow() != null
+                && (userTunnel.getInFlow() + userTunnel.getOutFlow()) >= userTunnel.getFlow() * BYTES_TO_GB) return false;
+        if (userTunnel.getDailyFlow() != null && userTunnel.getDailyFlow() > 0
+                && userTunnel.getDailyInFlow() != null && userTunnel.getDailyOutFlow() != null
+                && (userTunnel.getDailyInFlow() + userTunnel.getDailyOutFlow()) >= userTunnel.getDailyFlow() * BYTES_TO_GB) return false;
+        return true;
     }
 
 

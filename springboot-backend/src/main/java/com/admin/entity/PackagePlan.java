@@ -20,6 +20,8 @@ public class PackagePlan implements Serializable {
     private Integer durationMultiplier;
     private Long userGroupId;
     private Long flow;
+    /** 每日流量限制（GiB），0=不限制 */
+    private Long dailyFlow;
     private Integer maxRules;
     private Integer speedMbps;
     private Integer ipLimit;
