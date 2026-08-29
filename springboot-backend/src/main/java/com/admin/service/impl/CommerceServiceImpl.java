@@ -1,12 +1,15 @@
 package com.admin.service.impl;
 
 import com.admin.common.dto.CommerceDto.*;
+import com.admin.common.dto.PaymentDto.PaymentCreateResult;
+import com.admin.common.dto.PaymentDto.PaymentNotifyResult;
 import com.admin.common.lang.R;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.Md5Util;
 import com.admin.entity.*;
 import com.admin.mapper.*;
 import com.admin.service.CommerceService;
+import com.admin.service.PaymentService;
 import com.admin.service.ViteConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -63,6 +66,8 @@ public class CommerceServiceImpl implements CommerceService {
     private TunnelMapper tunnelMapper;
     @Resource
     private ViteConfigService viteConfigService;
+    @Resource
+    private PaymentService paymentService;
 
     @Override
     public R listPlans(boolean admin) {
@@ -348,6 +353,12 @@ public class CommerceServiceImpl implements CommerceService {
         }
 
         OrderRecord order = buildOrder(user, plan, discountRatio, redeemCode, ORDER_PENDING);
+        order.setPaymentChannel(request.getPaymentChannel());
+        PaymentCreateResult payment = paymentService.createPayment(order);
+        if (!payment.isSuccess()) return R.err(payment.getMessage());
+        order.setPaymentChannel(payment.getChannel());
+        order.setProviderTradeNo(payment.getProviderTradeNo());
+        order.setPaymentUrl(payment.getPaymentUrl());
         orderRecordMapper.insert(order);
         return R.ok(order);
     }
@@ -355,13 +366,35 @@ public class CommerceServiceImpl implements CommerceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public R completeOrder(Long id, boolean admin) {
+        if (!admin) return R.err("订单只能由管理员确认或支付回调完成");
         OrderRecord order = orderRecordMapper.selectById(id);
         if (order == null) return R.err("订单不存在");
         User user = currentUser();
         if (user == null) return R.err("用户不存在");
-        if (!admin && !Objects.equals(order.getUserId(), user.getId())) return R.err("无权操作此订单");
         if (!Objects.equals(order.getStatus(), ORDER_PENDING)) return R.err("订单不是待完成状态");
+        order.setPaidAmount(order.getPayableAmount());
+        return finishOrder(order);
+    }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R completePaidOrder(PaymentNotifyResult notifyResult) {
+        if (notifyResult == null || !notifyResult.isSuccess()) return R.err("支付通知无效");
+        QueryWrapper<OrderRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("order_no", notifyResult.getOrderNo());
+        OrderRecord order = orderRecordMapper.selectOne(wrapper);
+        if (order == null) return R.err("订单不存在");
+        if (Objects.equals(order.getStatus(), ORDER_COMPLETED)) return R.ok(order);
+        if (!Objects.equals(order.getStatus(), ORDER_PENDING)) return R.err("订单不是待完成状态");
+        if (!Objects.equals(order.getPaymentChannel(), notifyResult.getChannel())) return R.err("支付渠道不匹配");
+        BigDecimal paidAmount = notifyResult.getPaidAmount() == null ? BigDecimal.ZERO : notifyResult.getPaidAmount();
+        if (paidAmount.compareTo(order.getPayableAmount()) < 0) return R.err("支付金额不足");
+        order.setProviderTradeNo(notifyResult.getProviderTradeNo());
+        order.setPaidAmount(paidAmount);
+        return finishOrder(order);
+    }
+
+    private R finishOrder(OrderRecord order) {
         User buyer = userMapper.selectById(order.getUserId());
         if (buyer == null) return R.err("订单用户不存在");
         PackagePlan plan = packagePlanMapper.selectById(order.getPackagePlanId());

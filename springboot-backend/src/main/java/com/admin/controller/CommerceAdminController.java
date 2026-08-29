@@ -3,6 +3,7 @@ package com.admin.controller;
 import com.admin.common.annotation.RequireRole;
 import com.admin.common.aop.LogAnnotation;
 import com.admin.common.dto.CommerceDto.*;
+import com.admin.common.dto.PaymentDto.PaymentConfigRequest;
 import com.admin.common.lang.R;
 import com.admin.service.CommerceService;
 import org.springframework.validation.annotation.Validated;
@@ -126,4 +127,14 @@ public class CommerceAdminController extends BaseController {
     @RequireRole
     @PostMapping("/invite/records")
     public R inviteRecords() { return commerceService.inviteRecords(true); }
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/payment/configs")
+    public R paymentConfigs() { return paymentService.listPaymentConfigs(true); }
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/payment/config/update")
+    public R updatePaymentConfig(@Validated @RequestBody PaymentConfigRequest request) { return paymentService.updatePaymentConfig(request); }
 }

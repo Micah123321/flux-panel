@@ -24,11 +24,13 @@ import {
   adminGetInviteRecords,
   adminGetOrders,
   adminGetPackagePlans,
+  adminGetPaymentConfigs,
   adminGetRedeemCodes,
   adminGetUserGroups,
   adminUpdateDeviceGroup,
   adminUpdateInviteConfig,
   adminUpdatePackagePlan,
+  adminUpdatePaymentConfig,
   adminUpdateUserGroup,
   getTunnelList,
 } from "@/api";
@@ -37,19 +39,21 @@ import {
   InviteRecordsData,
   OrderRecord,
   PackagePlan,
+  PaymentConfig,
   RedeemCode,
   Tunnel,
   UserGroup,
 } from "@/types";
 import { isAdmin } from "@/utils/auth";
 
-type TabKey = "plans" | "groups" | "redeem" | "orders" | "invite";
+type TabKey = "plans" | "groups" | "redeem" | "orders" | "payment" | "invite";
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: "plans", label: "套餐" },
   { key: "groups", label: "用户组/设备组" },
   { key: "redeem", label: "兑换码" },
   { key: "orders", label: "订单" },
+  { key: "payment", label: "支付方式" },
   { key: "invite", label: "邀请返现" },
 ];
 
@@ -74,6 +78,13 @@ const emptyDeviceGroupForm = { id: "", name: "", description: "", tunnelIds: [] 
 const emptyUserGroupForm = { id: "", name: "", description: "", deviceGroupIds: [] as number[], status: "1" };
 const emptyRedeemForm = { packagePlanId: "", discountRatio: "100", totalTimes: "1", count: "1", codes: "" };
 
+const defaultPaymentConfigs: PaymentConfig[] = [
+  { channel: "easypay", displayName: "EasyPay 易支付", enabled: false, payType: "alipay", currency: "CNY", status: 1 },
+  { channel: "alipay", displayName: "支付宝官方", enabled: false, currency: "CNY", status: 1 },
+  { channel: "wechat", displayName: "微信支付官方", enabled: false, currency: "CNY", status: 1 },
+  { channel: "stripe", displayName: "Stripe", enabled: false, currency: "cny", status: 1 },
+];
+
 const statusText = (status: number) => (status === 1 ? "正常" : status === 0 ? "待处理" : "停用");
 const orderStatusText = (status: number) => (status === 1 ? "已完成" : "待支付");
 const money = (value?: number) => `￥${Number(value || 0).toFixed(2)}`;
@@ -89,6 +100,7 @@ export default function CommerceAdminPage() {
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
   const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [paymentConfigs, setPaymentConfigs] = useState<PaymentConfig[]>(defaultPaymentConfigs);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [inviteData, setInviteData] = useState<InviteRecordsData>({ invites: [], rewards: [] });
   const [inviteConfig, setInviteConfig] = useState({ inviteRatio: "0", inviteRenewalRatio: "0" });
@@ -100,12 +112,13 @@ export default function CommerceAdminPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [planRes, deviceGroupRes, userGroupRes, redeemRes, orderRes, tunnelRes, inviteConfigRes, inviteRecordsRes] = await Promise.all([
+      const [planRes, deviceGroupRes, userGroupRes, redeemRes, orderRes, paymentRes, tunnelRes, inviteConfigRes, inviteRecordsRes] = await Promise.all([
         adminGetPackagePlans(),
         adminGetDeviceGroups(),
         adminGetUserGroups(),
         adminGetRedeemCodes(),
         adminGetOrders(),
+        adminGetPaymentConfigs(),
         getTunnelList(),
         adminGetInviteConfig(),
         adminGetInviteRecords(),
@@ -116,6 +129,7 @@ export default function CommerceAdminPage() {
       if (userGroupRes.code === 0) setUserGroups((userGroupRes.data || []) as UserGroup[]);
       if (redeemRes.code === 0) setRedeemCodes((redeemRes.data || []) as RedeemCode[]);
       if (orderRes.code === 0) setOrders((orderRes.data || []) as OrderRecord[]);
+      if (paymentRes.code === 0) setPaymentConfigs((paymentRes.data || defaultPaymentConfigs) as PaymentConfig[]);
       if (tunnelRes.code === 0) setTunnels((tunnelRes.data || []) as Tunnel[]);
       if (inviteConfigRes.code === 0 && inviteConfigRes.data) {
         const data = inviteConfigRes.data as { inviteRatio: number; inviteRenewalRatio: number };
@@ -269,6 +283,23 @@ export default function CommerceAdminPage() {
     loadData();
   };
 
+  const updatePaymentConfigState = (channel: string, patch: Partial<PaymentConfig>) => {
+    setPaymentConfigs((items) => items.map((item) => (item.channel === channel ? { ...item, ...patch } : item)));
+  };
+
+  const savePaymentConfig = async (config: PaymentConfig) => {
+    if (!config.displayName?.trim()) return toast.error("请输入支付方式名称");
+    setSaving(true);
+    try {
+      const res = await adminUpdatePaymentConfig({ ...config, status: config.status ?? 1 });
+      if (res.code !== 0) return toast.error(res.msg || "支付方式保存失败");
+      toast.success("支付方式已保存");
+      await loadData();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveInviteConfig = async () => {
     const res = await adminUpdateInviteConfig({
       inviteRatio: Number(inviteConfig.inviteRatio),
@@ -348,7 +379,18 @@ export default function CommerceAdminPage() {
   );
 
   const renderOrders = () => (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">{orders.map((order) => <Card key={order.id} className="border border-gray-200 dark:border-default-200 shadow-sm"><CardBody className="space-y-3"><div className="flex items-start justify-between gap-2"><div><h3 className="font-semibold break-all">{order.orderNo}</h3><p className="text-sm text-default-500">用户 #{order.userId} · {order.packageName}</p></div><Chip color={order.status === 1 ? "success" : "warning"}>{orderStatusText(order.status)}</Chip></div><div className="grid grid-cols-2 gap-2 text-sm"><span>原价 {money(order.originalAmount)}</span><span>实付 {money(order.payableAmount)}</span><span>折扣 {order.discountRatio}%</span><span>返现 {money(order.rewardAmount)}</span><span>创建 {timeText(order.createdTime)}</span><span>完成 {timeText(order.completedTime)}</span></div>{order.status === 0 && <Button size="sm" color="primary" onClick={() => completeOrderByAdmin(order.id)}>标记完成并发放</Button>}</CardBody></Card>)}</div>
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">{orders.map((order) => <Card key={order.id} className="border border-gray-200 dark:border-default-200 shadow-sm"><CardBody className="space-y-3"><div className="flex items-start justify-between gap-2"><div><h3 className="font-semibold break-all">{order.orderNo}</h3><p className="text-sm text-default-500">用户 #{order.userId} · {order.packageName}</p></div><Chip color={order.status === 1 ? "success" : "warning"}>{orderStatusText(order.status)}</Chip></div><div className="grid grid-cols-2 gap-2 text-sm"><span>原价 {money(order.originalAmount)}</span><span>应付 {money(order.payableAmount)}</span><span>已付 {money(order.paidAmount)}</span><span>支付 {order.paymentChannel || "-"}</span><span>流水 {order.providerTradeNo || "-"}</span><span>完成 {timeText(order.completedTime)}</span></div>{order.status === 0 && <Button size="sm" color="primary" onClick={() => completeOrderByAdmin(order.id)}>标记完成并发放</Button>}</CardBody></Card>)}</div>
+  );
+
+  const renderPayment = () => (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">{paymentConfigs.map((config) => (
+      <Card key={config.channel} className="border border-gray-200 dark:border-default-200 shadow-sm"><CardHeader><div className="flex w-full items-center justify-between gap-3"><h2 className="text-lg font-semibold">{config.displayName}</h2><Chip size="sm" color={config.enabled ? "success" : "default"}>{config.enabled ? "启用" : "停用"}</Chip></div></CardHeader><CardBody className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><Input label="名称" value={config.displayName || ""} onChange={(e) => updatePaymentConfigState(config.channel, { displayName: e.target.value })} /><label className="text-sm text-default-600">启用<select className="mt-1 w-full rounded-md border border-default-200 bg-transparent px-3 py-2" value={config.enabled ? "1" : "0"} onChange={(e) => updatePaymentConfigState(config.channel, { enabled: e.target.value === "1" })}><option value="1">启用</option><option value="0">停用</option></select></label><Input label="支付类型" value={config.payType || ""} onChange={(e) => updatePaymentConfigState(config.channel, { payType: e.target.value })} /><Input label="币种" value={config.currency || ""} onChange={(e) => updatePaymentConfigState(config.channel, { currency: e.target.value })} /><Input label="网关地址" value={config.gatewayUrl || ""} onChange={(e) => updatePaymentConfigState(config.channel, { gatewayUrl: e.target.value })} /><Input label="App ID" value={config.appId || ""} onChange={(e) => updatePaymentConfigState(config.channel, { appId: e.target.value })} /><Input label="商户号" value={config.merchantId || ""} onChange={(e) => updatePaymentConfigState(config.channel, { merchantId: e.target.value })} /><Input label="证书序列号" value={config.serialNo || ""} onChange={(e) => updatePaymentConfigState(config.channel, { serialNo: e.target.value })} /><Input label="异步回调 URL" value={config.notifyUrl || ""} onChange={(e) => updatePaymentConfigState(config.channel, { notifyUrl: e.target.value })} /><Input label="成功返回 URL" value={config.returnUrl || ""} onChange={(e) => updatePaymentConfigState(config.channel, { returnUrl: e.target.value })} /><Input label="取消返回 URL" value={config.cancelUrl || ""} onChange={(e) => updatePaymentConfigState(config.channel, { cancelUrl: e.target.value })} /><Input label="Secret/APIv3 Key" value={config.secretKey || ""} onChange={(e) => updatePaymentConfigState(config.channel, { secretKey: e.target.value })} /><Input label="Stripe Secret Key" value={config.apiKey || ""} onChange={(e) => updatePaymentConfigState(config.channel, { apiKey: e.target.value })} /><Input label="Stripe Webhook Secret" value={config.endpointSecret || ""} onChange={(e) => updatePaymentConfigState(config.channel, { endpointSecret: e.target.value })} /></div>
+        <textarea className="w-full min-h-24 rounded-md border border-default-200 bg-transparent px-3 py-2 text-sm" placeholder="应用/商户私钥" value={config.privateKey || ""} onChange={(e) => updatePaymentConfigState(config.channel, { privateKey: e.target.value })} />
+        <textarea className="w-full min-h-24 rounded-md border border-default-200 bg-transparent px-3 py-2 text-sm" placeholder="平台/支付公钥或证书" value={config.publicKey || ""} onChange={(e) => updatePaymentConfigState(config.channel, { publicKey: e.target.value })} />
+        <Button color="primary" isLoading={saving} onClick={() => savePaymentConfig(config)}>保存支付方式</Button>
+      </CardBody></Card>
+    ))}</div>
   );
 
   const renderInvite = () => (
@@ -365,6 +407,7 @@ export default function CommerceAdminPage() {
       {activeTab === "groups" && renderGroups()}
       {activeTab === "redeem" && renderRedeem()}
       {activeTab === "orders" && renderOrders()}
+      {activeTab === "payment" && renderPayment()}
       {activeTab === "invite" && renderInvite()}
     </div>
   );

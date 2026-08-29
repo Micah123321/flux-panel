@@ -1,6 +1,7 @@
 package com.admin.service;
 
 import com.admin.common.dto.CommerceDto.*;
+import com.admin.common.dto.PaymentDto.PaymentNotifyResult;
 import com.admin.common.lang.R;
 
 public interface CommerceService {
@@ -28,6 +29,7 @@ public interface CommerceService {
 
     R createOrder(CreateOrderRequest request);
     R completeOrder(Long id, boolean admin);
+    R completePaidOrder(PaymentNotifyResult notifyResult);
     R listOrders(boolean admin);
 
     R getInviteConfig();

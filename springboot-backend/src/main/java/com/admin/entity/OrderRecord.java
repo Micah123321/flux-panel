@@ -21,6 +21,10 @@ public class OrderRecord implements Serializable {
     private Integer discountRatio;
     private BigDecimal payableAmount;
     private Integer status;
+    private String paymentChannel;
+    private String providerTradeNo;
+    private String paymentUrl;
+    private BigDecimal paidAmount;
     private Long redeemCodeId;
     private Long inviterUserId;
     private Integer rewardRatio;

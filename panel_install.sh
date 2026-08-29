@@ -1327,6 +1327,10 @@ CREATE TABLE IF NOT EXISTS \`order_record\` (
   \`discount_ratio\` int(10) NOT NULL DEFAULT 100,
   \`payable_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
   \`status\` int(10) NOT NULL DEFAULT 0,
+  \`payment_channel\` varchar(32) DEFAULT NULL,
+  \`provider_trade_no\` varchar(128) DEFAULT NULL,
+  \`payment_url\` longtext,
+  \`paid_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
   \`redeem_code_id\` int(10) DEFAULT NULL,
   \`inviter_user_id\` int(10) DEFAULT NULL,
   \`reward_ratio\` int(10) NOT NULL DEFAULT 0,
@@ -1335,7 +1339,8 @@ CREATE TABLE IF NOT EXISTS \`order_record\` (
   \`created_time\` bigint(20) NOT NULL,
   \`updated_time\` bigint(20) DEFAULT NULL,
   PRIMARY KEY (\`id\`),
-  UNIQUE KEY \`order_no\` (\`order_no\`)
+  UNIQUE KEY \`order_no\` (\`order_no\`),
+  KEY \`provider_trade_no\` (\`provider_trade_no\`)
 );
 
 CREATE TABLE IF NOT EXISTS \`redeem_code\` (
@@ -1379,6 +1384,121 @@ CREATE TABLE IF NOT EXISTS \`invite_reward_record\` (
   PRIMARY KEY (\`id\`)
 );
 
+
+-- order_record 表：添加 payment_channel 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND column_name = 'payment_channel'
+    ),
+    'ALTER TABLE \`order_record\` ADD COLUMN \`payment_channel\` VARCHAR(32) DEFAULT NULL COMMENT "支付渠道";',
+    'SELECT "Column \`payment_channel\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- order_record 表：添加 provider_trade_no 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND column_name = 'provider_trade_no'
+    ),
+    'ALTER TABLE \`order_record\` ADD COLUMN \`provider_trade_no\` VARCHAR(128) DEFAULT NULL COMMENT "支付平台流水号";',
+    'SELECT "Column \`provider_trade_no\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- order_record 表：添加 payment_url 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND column_name = 'payment_url'
+    ),
+    'ALTER TABLE \`order_record\` ADD COLUMN \`payment_url\` LONGTEXT COMMENT "支付链接或二维码内容";',
+    'SELECT "Column \`payment_url\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- order_record 表：添加 paid_amount 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND column_name = 'paid_amount'
+    ),
+    'ALTER TABLE \`order_record\` ADD COLUMN \`paid_amount\` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT "实付金额";',
+    'SELECT "Column \`paid_amount\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.STATISTICS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND index_name = 'provider_trade_no'
+    ),
+    'ALTER TABLE \`order_record\` ADD KEY \`provider_trade_no\` (\`provider_trade_no\`);',
+    'SELECT "Index \`provider_trade_no\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS \`payment_config\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`channel\` varchar(32) NOT NULL,
+  \`display_name\` varchar(100) NOT NULL,
+  \`enabled\` tinyint(1) NOT NULL DEFAULT 0,
+  \`pay_type\` varchar(32) DEFAULT NULL,
+  \`gateway_url\` varchar(500) DEFAULT NULL,
+  \`app_id\` varchar(200) DEFAULT NULL,
+  \`merchant_id\` varchar(200) DEFAULT NULL,
+  \`secret_key\` longtext,
+  \`private_key\` longtext,
+  \`public_key\` longtext,
+  \`api_key\` longtext,
+  \`endpoint_secret\` longtext,
+  \`serial_no\` varchar(200) DEFAULT NULL,
+  \`notify_url\` varchar(500) DEFAULT NULL,
+  \`return_url\` varchar(500) DEFAULT NULL,
+  \`cancel_url\` varchar(500) DEFAULT NULL,
+  \`currency\` varchar(16) DEFAULT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`channel\` (\`channel\`)
+);
 INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`) VALUES
   ('invite_ratio', '0', UNIX_TIMESTAMP() * 1000),
   ('invite_renewal_ratio', '0', UNIX_TIMESTAMP() * 1000)

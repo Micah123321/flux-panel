@@ -155,6 +155,10 @@ export interface OrderRecord {
   discountRatio: number;
   payableAmount: number;
   status: number;
+  paymentChannel?: string;
+  providerTradeNo?: string;
+  paymentUrl?: string;
+  paidAmount?: number;
   redeemCodeId?: number | null;
   inviterUserId?: number | null;
   rewardRatio: number;
@@ -197,6 +201,27 @@ export interface InviteRewardRecord {
 export interface InviteRecordsData {
   invites: InviteRecord[];
   rewards: InviteRewardRecord[];
+}
+
+export interface PaymentConfig {
+  channel: string;
+  displayName: string;
+  enabled: boolean;
+  payType?: string;
+  gatewayUrl?: string;
+  appId?: string;
+  merchantId?: string;
+  secretKey?: string;
+  privateKey?: string;
+  publicKey?: string;
+  apiKey?: string;
+  endpointSecret?: string;
+  serialNo?: string;
+  notifyUrl?: string;
+  returnUrl?: string;
+  cancelUrl?: string;
+  currency?: string;
+  status?: number;
 }
 
 export interface Pagination {

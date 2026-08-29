@@ -122,6 +122,9 @@ public class CommerceDto {
         private Long packagePlanId;
 
         private String redeemCode;
+
+        @NotBlank(message = "支付方式不能为空")
+        private String paymentChannel;
     }
 
     @Data

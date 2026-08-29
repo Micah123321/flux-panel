@@ -335,6 +335,10 @@ CREATE TABLE `order_record` (
   `discount_ratio` int(10) NOT NULL DEFAULT '100',
   `payable_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
   `status` int(10) NOT NULL DEFAULT '0',
+  `payment_channel` varchar(32) DEFAULT NULL,
+  `provider_trade_no` varchar(128) DEFAULT NULL,
+  `payment_url` longtext,
+  `paid_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
   `redeem_code_id` int(10) DEFAULT NULL,
   `inviter_user_id` int(10) DEFAULT NULL,
   `reward_ratio` int(10) NOT NULL DEFAULT '0',
@@ -393,6 +397,36 @@ CREATE TABLE `invite_reward_record` (
   `reward_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
   `ratio` int(10) NOT NULL DEFAULT '0',
   `type` int(10) NOT NULL DEFAULT '1',
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `payment_config`
+--
+
+CREATE TABLE `payment_config` (
+  `id` int(10) NOT NULL,
+  `channel` varchar(32) NOT NULL,
+  `display_name` varchar(100) NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `pay_type` varchar(32) DEFAULT NULL,
+  `gateway_url` varchar(500) DEFAULT NULL,
+  `app_id` varchar(200) DEFAULT NULL,
+  `merchant_id` varchar(200) DEFAULT NULL,
+  `secret_key` longtext,
+  `private_key` longtext,
+  `public_key` longtext,
+  `api_key` longtext,
+  `endpoint_secret` longtext,
+  `serial_no` varchar(200) DEFAULT NULL,
+  `notify_url` varchar(500) DEFAULT NULL,
+  `return_url` varchar(500) DEFAULT NULL,
+  `cancel_url` varchar(500) DEFAULT NULL,
+  `currency` varchar(16) DEFAULT NULL,
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) NOT NULL DEFAULT '1'
@@ -493,7 +527,8 @@ ALTER TABLE `user_group_device_group`
 --
 ALTER TABLE `order_record`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `order_no` (`order_no`);
+  ADD UNIQUE KEY `order_no` (`order_no`),
+  ADD KEY `provider_trade_no` (`provider_trade_no`);
 
 --
 -- 表的索引 `redeem_code`
@@ -514,6 +549,13 @@ ALTER TABLE `invite_record`
 --
 ALTER TABLE `invite_reward_record`
   ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `payment_config`
+--
+ALTER TABLE `payment_config`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `channel` (`channel`);
 
 --
 -- 在导出的表使用AUTO_INCREMENT
@@ -625,6 +667,11 @@ ALTER TABLE `invite_record`
 -- 使用表AUTO_INCREMENT `invite_reward_record`
 --
 ALTER TABLE `invite_reward_record`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+--
+-- 使用表AUTO_INCREMENT `payment_config`
+--
+ALTER TABLE `payment_config`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 COMMIT;
 

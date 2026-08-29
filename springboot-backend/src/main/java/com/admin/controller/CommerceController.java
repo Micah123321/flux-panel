@@ -21,12 +21,13 @@ public class CommerceController extends BaseController {
     public R plans() { return commerceService.listPlans(false); }
 
     @LogAnnotation
+    @PostMapping("/payment/configs")
+    public R paymentConfigs() { return paymentService.listPaymentConfigs(false); }
+
+    @LogAnnotation
     @PostMapping("/order/create")
     public R createOrder(@Validated @RequestBody CreateOrderRequest request) { return commerceService.createOrder(request); }
 
-    @LogAnnotation
-    @PostMapping("/order/complete")
-    public R completeOrder(@Validated @RequestBody CompleteOrderRequest request) { return commerceService.completeOrder(request.getId(), false); }
 
     @LogAnnotation
     @PostMapping("/orders")

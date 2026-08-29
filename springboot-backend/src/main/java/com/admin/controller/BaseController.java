@@ -26,4 +26,7 @@ public class BaseController {
     @Autowired
     CommerceService commerceService;
 
+    @Autowired
+    PaymentService paymentService;
+
 }

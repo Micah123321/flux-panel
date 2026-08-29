@@ -6,8 +6,8 @@ import { Spinner } from "@heroui/spinner";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 
-import { completeOrder, createOrder, getInviteInfo, getMyInviteRecords, getMyOrders, getPackagePlans, redeemCode } from "@/api";
-import { InviteInfo, InviteRecordsData, OrderRecord, PackagePlan } from "@/types";
+import { createOrder, getInviteInfo, getMyInviteRecords, getMyOrders, getPackagePlans, getPaymentConfigs, redeemCode } from "@/api";
+import { InviteInfo, InviteRecordsData, OrderRecord, PackagePlan, PaymentConfig } from "@/types";
 
 type TabKey = "plans" | "orders" | "redeem" | "invite";
 
@@ -26,8 +26,11 @@ export default function CommercePage() {
   const [activeTab, setActiveTab] = useState<TabKey>("plans");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [orderSaving, setOrderSaving] = useState(false);
   const [plans, setPlans] = useState<PackagePlan[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [paymentConfigs, setPaymentConfigs] = useState<PaymentConfig[]>([]);
+  const [selectedPaymentChannel, setSelectedPaymentChannel] = useState("");
   const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
   const [inviteRecords, setInviteRecords] = useState<InviteRecordsData>({ invites: [], rewards: [] });
   const [redeemInput, setRedeemInput] = useState("");
@@ -36,14 +39,20 @@ export default function CommercePage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [planRes, orderRes, inviteInfoRes, inviteRecordsRes] = await Promise.all([
+      const [planRes, orderRes, paymentRes, inviteInfoRes, inviteRecordsRes] = await Promise.all([
         getPackagePlans(),
         getMyOrders(),
+        getPaymentConfigs(),
         getInviteInfo(),
         getMyInviteRecords(),
       ]);
       if (planRes.code === 0) setPlans((planRes.data || []) as PackagePlan[]);
       if (orderRes.code === 0) setOrders((orderRes.data || []) as OrderRecord[]);
+      if (paymentRes.code === 0) {
+        const configs = (paymentRes.data || []) as PaymentConfig[];
+        setPaymentConfigs(configs);
+        setSelectedPaymentChannel((current) => configs.some((item) => item.channel === current) ? current : configs[0]?.channel || "");
+      }
       if (inviteInfoRes.code === 0 && inviteInfoRes.data) setInviteInfo(inviteInfoRes.data as InviteInfo);
       if (inviteRecordsRes.code === 0 && inviteRecordsRes.data) setInviteRecords(inviteRecordsRes.data as InviteRecordsData);
     } catch (error) {
@@ -59,27 +68,18 @@ export default function CommercePage() {
   }, []);
 
   const createPlanOrder = async (plan: PackagePlan) => {
-    setSaving(true);
+    if (!selectedPaymentChannel) return toast.error("请选择支付方式");
+    setOrderSaving(true);
     try {
-      const res = await createOrder({ packagePlanId: plan.id, redeemCode: orderRedeemCode[plan.id] || undefined });
+      const res = await createOrder({ packagePlanId: plan.id, redeemCode: orderRedeemCode[plan.id] || undefined, paymentChannel: selectedPaymentChannel });
       if (res.code !== 0) return toast.error(res.msg || "创建订单失败");
-      toast.success("订单已创建");
+      const order = res.data as OrderRecord;
+      toast.success("订单已创建，请前往支付页付款");
+      if (order.paymentUrl) window.open(order.paymentUrl, "_blank", "noopener,noreferrer");
       setActiveTab("orders");
       await loadData();
     } finally {
-      setSaving(false);
-    }
-  };
-
-  const complete = async (id: number) => {
-    setSaving(true);
-    try {
-      const res = await completeOrder(id);
-      if (res.code !== 0) return toast.error(res.msg || "完成订单失败");
-      toast.success("套餐已发放");
-      await loadData();
-    } finally {
-      setSaving(false);
+      setOrderSaving(false);
     }
   };
 
@@ -113,7 +113,8 @@ export default function CommercePage() {
             <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{plan.name}</h2><p className="text-sm text-default-500">{plan.description || "-"}</p></div><Chip color="primary" variant="flat">{money(plan.price)}</Chip></div>
             <div className="grid grid-cols-2 gap-2 text-sm"><span>{plan.durationMultiplier}个月</span><span>{plan.flow} GiB</span><span>{plan.maxRules} 条规则</span><span>{plan.speedMbps || 0} Mbps</span><span>IP {plan.ipLimit || 0}</span><span>连接 {plan.connectionLimit || 0}</span></div>
             <Input label="兑换码（可选）" value={orderRedeemCode[plan.id] || ""} onChange={(e) => setOrderRedeemCode({ ...orderRedeemCode, [plan.id]: e.target.value })} />
-            <Button color="primary" isLoading={saving} onClick={() => createPlanOrder(plan)}>购买</Button>
+            <label className="text-sm text-default-600">支付方式<select className="mt-1 w-full rounded-md border border-default-200 bg-transparent px-3 py-2" value={selectedPaymentChannel} onChange={(e) => setSelectedPaymentChannel(e.target.value)}><option value="">请选择</option>{paymentConfigs.map((item) => <option key={item.channel} value={item.channel}>{item.displayName}</option>)}</select></label>
+            <Button color="primary" isDisabled={paymentConfigs.length === 0} isLoading={orderSaving} onClick={() => createPlanOrder(plan)}>购买</Button>
           </CardBody>
         </Card>
       ))}
@@ -127,8 +128,8 @@ export default function CommercePage() {
         <Card key={order.id} className="border border-gray-200 dark:border-default-200 shadow-sm">
           <CardBody className="space-y-3">
             <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold break-all">{order.orderNo}</h2><p className="text-sm text-default-500">{order.packageName}</p></div><Chip color={order.status === 1 ? "success" : "warning"}>{orderStatusText(order.status)}</Chip></div>
-            <div className="grid grid-cols-2 gap-2 text-sm"><span>原价 {money(order.originalAmount)}</span><span>实付 {money(order.payableAmount)}</span><span>折扣 {order.discountRatio}%</span><span>返现 {money(order.rewardAmount)}</span><span>创建 {timeText(order.createdTime)}</span><span>完成 {timeText(order.completedTime)}</span></div>
-            {order.status === 0 && <Button size="sm" color="primary" isLoading={saving} onClick={() => complete(order.id)}>完成支付</Button>}
+            <div className="grid grid-cols-2 gap-2 text-sm"><span>原价 {money(order.originalAmount)}</span><span>实付 {money(order.payableAmount)}</span><span>折扣 {order.discountRatio}%</span><span>支付 {order.paymentChannel || "-"}</span><span>返现 {money(order.rewardAmount)}</span><span>完成 {timeText(order.completedTime)}</span></div>
+            {order.status === 0 && <div className="flex flex-wrap gap-2"><Chip size="sm" variant="flat" color="warning">等待支付到账</Chip>{order.paymentUrl && <Button size="sm" variant="flat" onClick={() => window.open(order.paymentUrl, "_blank", "noopener,noreferrer")}>继续支付</Button>}</div>}
           </CardBody>
         </Card>
       ))}

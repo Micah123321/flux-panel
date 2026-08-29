@@ -101,8 +101,8 @@ export const updateConfig = (name: string, value: string) => Network.post("/conf
 // 商业化功能接口
 export const registerUser = (data: any) => Network.post("/commerce/register", data);
 export const getPackagePlans = () => Network.post("/commerce/plans");
+export const getPaymentConfigs = () => Network.post("/commerce/payment/configs");
 export const createOrder = (data: any) => Network.post("/commerce/order/create", data);
-export const completeOrder = (id: number) => Network.post("/commerce/order/complete", { id });
 export const getMyOrders = () => Network.post("/commerce/orders");
 export const redeemCode = (code: string) => Network.post("/commerce/redeem", { code });
 export const getInviteInfo = () => Network.post("/commerce/invite/info");
@@ -130,6 +130,8 @@ export const adminCompleteOrder = (id: number) => Network.post("/admin/commerce/
 export const adminGetInviteConfig = () => Network.post("/admin/commerce/invite/config");
 export const adminUpdateInviteConfig = (data: any) => Network.post("/admin/commerce/invite/config/update", data);
 export const adminGetInviteRecords = () => Network.post("/admin/commerce/invite/records");
+export const adminGetPaymentConfigs = () => Network.post("/admin/commerce/payment/configs");
+export const adminUpdatePaymentConfig = (data: any) => Network.post("/admin/commerce/payment/config/update", data);
 
 // 验证码相关接口
 export const checkCaptcha = () => Network.post("/captcha/check");
