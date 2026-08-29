@@ -2,6 +2,8 @@
 
 ## 2026-08-29
 
+- 修复 CI 构建失败：上一变更移除 `go-gost/x/service` 的 `init()` 时遗留了已无使用的标准库 `"log"` import（`log.Fatal` 仅存在于被删代码中，`log.Errorf` 等调用实际指向局部 logger 变量），触发 `"log" imported and not used` 编译错误；删除该 import 并通过 `go build ./...` 全量验证。
+
 - 修复一键安装 GOST 失败：`go-gost/x/service` 的 `init()` 在解析任何命令行参数前强制加载 `config.json`，导致 `install.sh` 的 `-V` 版本探测必然触发 `配置文件不存在` 并退出。移除该预检（主流程 `main()` 中已有同等校验，预检无任何下游作用），并修正 `main.go` 两处 `fmt.Println` 误用格式化占位符的输出；`install.sh` 将 `config.json` 写入提前到 `-V` 探测前，兼容线上旧版二进制。
 
 - 移除 Android / iOS 原生客户端、`flux.ipa`，以及前端 WebView 桥接和面板设置页；面板仅保留 Web / H5。
