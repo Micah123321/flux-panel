@@ -86,6 +86,16 @@ export default function AdminLayout({
       )
     },
     {
+      path: '/guide',
+      label: '使用向导',
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M11 3a1 1 0 10-2 0v1a1 1 0 100 2v1a1 1 0 100 2v1a1 1 0 100 2v1H8a1 1 0 100 2h4a1 1 0 100-2h-1v-1a1 1 0 100-2V9a1 1 0 100-2V6a1 1 0 100-2V3z" />
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z" clipRule="evenodd" />
+        </svg>
+      )
+    },
+    {
       path: '/tunnel',
       label: '隧道管理',
       icon: (

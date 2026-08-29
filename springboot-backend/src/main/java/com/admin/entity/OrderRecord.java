@@ -20,6 +20,7 @@ public class OrderRecord implements Serializable {
     private BigDecimal originalAmount;
     private Integer discountRatio;
     private BigDecimal payableAmount;
+    private BigDecimal inviteDeduction;
     private Integer status;
     private String paymentChannel;
     private String providerTradeNo;

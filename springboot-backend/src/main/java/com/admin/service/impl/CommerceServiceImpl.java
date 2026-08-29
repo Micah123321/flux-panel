@@ -336,6 +336,7 @@ public class CommerceServiceImpl implements CommerceService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public R createOrder(CreateOrderRequest request) {
         User user = currentUser();
         if (user == null) return R.err("用户不存在");
@@ -352,15 +353,48 @@ public class CommerceServiceImpl implements CommerceService {
             discountRatio = redeemCode.getDiscountRatio();
         }
 
-        OrderRecord order = buildOrder(user, plan, discountRatio, redeemCode, ORDER_PENDING);
+        BigDecimal payable = plan.getPrice().multiply(BigDecimal.valueOf(clampRatio(discountRatio, 100))).divide(HUNDRED, 2, RoundingMode.HALF_UP);
+        BigDecimal deduction = BigDecimal.ZERO;
+        if (Boolean.TRUE.equals(request.getUseInviteBalance())) {
+            BigDecimal balance = user.getInviteBalance() == null ? BigDecimal.ZERO : user.getInviteBalance();
+            deduction = balance.max(BigDecimal.ZERO).min(payable);
+        }
+        boolean balanceOnly = deduction.compareTo(payable) >= 0;
+
+        OrderRecord order = buildOrder(user, plan, discountRatio, redeemCode, balanceOnly ? ORDER_COMPLETED : ORDER_PENDING, deduction);
         order.setPaymentChannel(request.getPaymentChannel());
+        if (balanceOnly) {
+            R deductResult = deductInviteBalance(user.getId(), order.getInviteDeduction());
+            if (deductResult.getCode() != 0) return deductResult;
+            order.setPaidAmount(BigDecimal.ZERO);
+            order.setCompletedTime(System.currentTimeMillis());
+            orderRecordMapper.insert(order);
+            applyPackage(user, plan);
+            createInviteReward(order, user);
+            return R.ok(order);
+        }
         PaymentCreateResult payment = paymentService.createPayment(order);
         if (!payment.isSuccess()) return R.err(payment.getMessage());
+        if (deduction.compareTo(BigDecimal.ZERO) > 0) {
+            R deductResult = deductInviteBalance(user.getId(), order.getInviteDeduction());
+            if (deductResult.getCode() != 0) return deductResult;
+        }
         order.setPaymentChannel(payment.getChannel());
         order.setProviderTradeNo(payment.getProviderTradeNo());
         order.setPaymentUrl(payment.getPaymentUrl());
         orderRecordMapper.insert(order);
         return R.ok(order);
+    }
+
+    private R deductInviteBalance(Long userId, BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) return R.ok();
+        UpdateWrapper<User> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", userId)
+                .ge("invite_balance", amount)
+                .set("updated_time", System.currentTimeMillis())
+                .setSql("invite_balance = invite_balance - " + amount.toPlainString());
+        if (userMapper.update(null, wrapper) != 1) return R.err("邀请余额不足或已变动，请刷新后重试");
+        return R.ok();
     }
 
     @Override
@@ -372,7 +406,7 @@ public class CommerceServiceImpl implements CommerceService {
         User user = currentUser();
         if (user == null) return R.err("用户不存在");
         if (!Objects.equals(order.getStatus(), ORDER_PENDING)) return R.err("订单不是待完成状态");
-        order.setPaidAmount(order.getPayableAmount());
+        order.setPaidAmount(order.getPayableAmount().subtract(order.getInviteDeduction() == null ? BigDecimal.ZERO : order.getInviteDeduction()));
         return finishOrder(order);
     }
 
@@ -388,7 +422,8 @@ public class CommerceServiceImpl implements CommerceService {
         if (!Objects.equals(order.getStatus(), ORDER_PENDING)) return R.err("订单不是待完成状态");
         if (!Objects.equals(order.getPaymentChannel(), notifyResult.getChannel())) return R.err("支付渠道不匹配");
         BigDecimal paidAmount = notifyResult.getPaidAmount() == null ? BigDecimal.ZERO : notifyResult.getPaidAmount();
-        if (paidAmount.compareTo(order.getPayableAmount()) < 0) return R.err("支付金额不足");
+        BigDecimal expectedAmount = order.getPayableAmount().subtract(order.getInviteDeduction() == null ? BigDecimal.ZERO : order.getInviteDeduction());
+        if (paidAmount.compareTo(expectedAmount) < 0) return R.err("支付金额不足");
         order.setProviderTradeNo(notifyResult.getProviderTradeNo());
         order.setPaidAmount(paidAmount);
         return finishOrder(order);
@@ -626,6 +661,10 @@ public class CommerceServiceImpl implements CommerceService {
     }
 
     private OrderRecord buildOrder(User user, PackagePlan plan, Integer discountRatio, RedeemCode redeemCode, Integer status) {
+        return buildOrder(user, plan, discountRatio, redeemCode, status, BigDecimal.ZERO);
+    }
+
+    private OrderRecord buildOrder(User user, PackagePlan plan, Integer discountRatio, RedeemCode redeemCode, Integer status, BigDecimal inviteDeduction) {
         long now = System.currentTimeMillis();
         OrderRecord order = new OrderRecord();
         order.setOrderNo("ORD" + now + randomCode(6));
@@ -634,7 +673,10 @@ public class CommerceServiceImpl implements CommerceService {
         order.setPackageName(plan.getName());
         order.setOriginalAmount(plan.getPrice());
         order.setDiscountRatio(clampRatio(discountRatio, 100));
-        order.setPayableAmount(plan.getPrice().multiply(BigDecimal.valueOf(order.getDiscountRatio())).divide(HUNDRED, 2, RoundingMode.HALF_UP));
+        BigDecimal payable = plan.getPrice().multiply(BigDecimal.valueOf(order.getDiscountRatio())).divide(HUNDRED, 2, RoundingMode.HALF_UP);
+        BigDecimal deduction = inviteDeduction == null ? BigDecimal.ZERO : inviteDeduction.max(BigDecimal.ZERO).min(payable);
+        order.setPayableAmount(payable);
+        order.setInviteDeduction(deduction.setScale(2, RoundingMode.HALF_UP));
         order.setStatus(status);
         order.setRedeemCodeId(redeemCode == null ? null : redeemCode.getId());
         order.setInviterUserId(user.getInviterUserId());
@@ -717,7 +759,8 @@ public class CommerceServiceImpl implements CommerceService {
         boolean renewal = orderRecordMapper.selectCount(completedWrapper) > 0;
         int ratio = getConfigInt(renewal ? INVITE_RENEWAL_RATIO_KEY : INVITE_RATIO_KEY, 0);
         if (ratio <= 0) return;
-        BigDecimal rewardAmount = order.getPayableAmount().multiply(BigDecimal.valueOf(ratio)).divide(HUNDRED, 2, RoundingMode.HALF_UP);
+        BigDecimal rewardBase = order.getPayableAmount().subtract(order.getInviteDeduction() == null ? BigDecimal.ZERO : order.getInviteDeduction());
+        BigDecimal rewardAmount = rewardBase.multiply(BigDecimal.valueOf(ratio)).divide(HUNDRED, 2, RoundingMode.HALF_UP);
         if (rewardAmount.compareTo(BigDecimal.ZERO) <= 0) return;
 
         long now = System.currentTimeMillis();

@@ -16,7 +16,11 @@ const installer = read('panel_install.sh');
 const api = read('vite-frontend/src/api/index.ts');
 const app = read('vite-frontend/src/App.tsx');
 const commercePage = read('vite-frontend/src/pages/commerce.tsx');
-const commerceAdminPage = read('vite-frontend/src/pages/commerce-admin.tsx');
+const commerceAdminPage = read('vite-frontend/src/pages/commerce-admin/index.tsx');
+const guidePage = read('vite-frontend/src/pages/guide.tsx');
+const guideChecklist = read('vite-frontend/src/components/guide-checklist.tsx');
+const tourUtil = read('vite-frontend/src/utils/tour.ts');
+const paymentSection = read('vite-frontend/src/pages/commerce-admin/PaymentSection.tsx');
 
 for (const table of ['package_plan', 'device_group', 'user_group', 'order_record', 'redeem_code', 'invite_record', 'invite_reward_record', 'payment_config']) {
   assert.ok(new RegExp('CREATE TABLE [^\n]*' + table).test(schema), `missing ${table} in gost.sql`);
@@ -56,10 +60,31 @@ assert.match(api, /registerUser/);
 assert.match(api, /getPaymentConfigs/);
 assert.match(api, /adminUpdatePaymentConfig/);
 assert.match(commercePage, /paymentChannel: selectedPaymentChannel/);
-assert.match(commerceAdminPage, /支付方式/);
+assert.match(paymentSection, /支付方式/);
 assert.doesNotMatch(api, /Network\.post\("\/commerce\/order\/complete"/);
+
+// 邀请余额抵扣链路
+assert.match(commerceService, /getUseInviteBalance\(\)/);
+assert.match(commerceService, /deductInviteBalance/);
+assert.match(commerceService, /invite_deduction|inviteDeduction/);
+assert.match(orderEntity, /private .* inviteDeduction;/);
+assert.match(schema, /`invite_deduction` decimal/);
+assert.match(installer, /invite_deduction/);
+assert.match(paymentService, /netAmount\(order\)/);
+assert.match(commercePage, /useInviteBalance/);
+
+// 引导系统
+assert.match(app, /path=\"\/guide\"/);
+assert.match(guidePage, /GuideChecklist/);
+assert.match(guideChecklist, /管理员部署向导/);
+assert.match(guideChecklist, /配置支付方式/);
+assert.match(tourUtil, /driver/);
+assert.match(commercePage, /runTour/);
+assert.match(commerceAdminPage, /PaymentSection/);
 assert.doesNotMatch(userController, /@PostMapping\("\/order\/complete"\)/);
-assert.doesNotMatch(commercePage, /完成支付/);
+// 用户端不允许直接调完成订单接口（模态框按钮只做状态查询）
+assert.doesNotMatch(commercePage, /order\/complete/);
+assert.match(commercePage, /查询支付结果|我已完成支付/);
 assert.match(app, /path="\/shop"/);
 assert.match(app, /path="\/commerce-admin"/);
 assert.match(app, /path="\/register"/);

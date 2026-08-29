@@ -15,6 +15,7 @@ import ConfigPage from "@/pages/config";
 import CommercePage from "@/pages/commerce";
 import CommerceAdminPage from "@/pages/commerce-admin";
 import RegisterPage from "@/pages/register";
+import GuidePage from "@/pages/guide";
 
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
@@ -222,6 +223,14 @@ function App() {
         element={
           <ProtectedRoute>
             <CommercePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/guide"
+        element={
+          <ProtectedRoute>
+            <GuidePage />
           </ProtectedRoute>
         }
       />

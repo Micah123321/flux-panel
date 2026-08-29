@@ -137,7 +137,7 @@ interface GuideChecklistProps {
 
 export default function GuideChecklist({ isAdmin, compact = false, onSkip }: GuideChecklistProps) {
   const navigate = useNavigate();
-  const [steps, setSteps] = useState<GuideStep[]>(isAdmin ? adminSteps : userSteps);
+  const [steps] = useState<GuideStep[]>(isAdmin ? adminSteps : userSteps);
   const [done, setDone] = useState<Record<string, boolean>>({});
   const [checking, setChecking] = useState(true);
 

@@ -146,7 +146,7 @@ public class PaymentServiceImpl implements PaymentService {
         params.put("notify_url", require(config.getNotifyUrl(), "EasyPay异步通知地址"));
         params.put("return_url", require(config.getReturnUrl(), "EasyPay同步返回地址"));
         params.put("name", order.getPackageName());
-        params.put("money", amountText(order.getPayableAmount()));
+        params.put("money", amountText(netAmount(order)));
         String sign = PaymentSignUtil.md5Lower(PaymentSignUtil.canonicalQuery(params, Set.of(), false) + require(config.getSecretKey(), "EasyPay密钥"));
         params.put("sign", sign);
         params.put("sign_type", "MD5");
@@ -158,7 +158,7 @@ public class PaymentServiceImpl implements PaymentService {
         String gateway = defaultText(config.getGatewayUrl(), defaultGateway(CHANNEL_ALIPAY));
         JSONObject biz = new JSONObject();
         biz.put("out_trade_no", order.getOrderNo());
-        biz.put("total_amount", amountText(order.getPayableAmount()));
+        biz.put("total_amount", amountText(netAmount(order)));
         biz.put("subject", order.getPackageName());
         biz.put("product_code", "FAST_INSTANT_TRADE_PAY");
         Map<String, String> params = new HashMap<>();
@@ -180,7 +180,7 @@ public class PaymentServiceImpl implements PaymentService {
     private PaymentCreateResult createWechat(OrderRecord order, PaymentConfig config) throws Exception {
         String gateway = defaultText(config.getGatewayUrl(), defaultGateway(CHANNEL_WECHAT));
         JSONObject amount = new JSONObject();
-        amount.put("total", amountToCents(order.getPayableAmount()));
+        amount.put("total", amountToCents(netAmount(order)));
         amount.put("currency", defaultText(config.getCurrency(), "CNY"));
         JSONObject body = new JSONObject();
         body.put("appid", require(config.getAppId(), "微信App ID"));
@@ -209,7 +209,7 @@ public class PaymentServiceImpl implements PaymentService {
         form.put("cancel_url", require(config.getCancelUrl(), "Stripe取消返回地址"));
         form.put("line_items[0][quantity]", "1");
         form.put("line_items[0][price_data][currency]", defaultText(config.getCurrency(), "cny").toLowerCase());
-        form.put("line_items[0][price_data][unit_amount]", String.valueOf(amountToCents(order.getPayableAmount())));
+        form.put("line_items[0][price_data][unit_amount]", String.valueOf(amountToCents(netAmount(order))));
         form.put("line_items[0][price_data][product_data][name]", order.getPackageName());
         form.put("metadata[order_no]", order.getOrderNo());
         Map<String, String> headers = new HashMap<>();
@@ -426,6 +426,12 @@ public class PaymentServiceImpl implements PaymentService {
 
     private String trimQuestion(String value) {
         return value.endsWith("?") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private BigDecimal netAmount(OrderRecord order) {
+        BigDecimal deduction = order.getInviteDeduction() == null ? BigDecimal.ZERO : order.getInviteDeduction();
+        BigDecimal net = order.getPayableAmount().subtract(deduction);
+        return net.compareTo(BigDecimal.ZERO) <= 0 ? order.getPayableAmount() : net;
     }
 
     private String amountText(BigDecimal amount) {

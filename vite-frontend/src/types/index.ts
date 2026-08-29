@@ -99,6 +99,7 @@ export interface PackagePlan {
   durationMultiplier: number;
   userGroupId?: number | null;
   flow: number;
+  dailyFlow: number;
   maxRules: number;
   speedMbps: number;
   ipLimit: number;
@@ -154,6 +155,7 @@ export interface OrderRecord {
   originalAmount: number;
   discountRatio: number;
   payableAmount: number;
+  inviteDeduction?: number;
   status: number;
   paymentChannel?: string;
   providerTradeNo?: string;

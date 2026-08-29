@@ -1457,6 +1457,24 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- order_record 表：添加 invite_deduction 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'order_record'
+        AND column_name = 'invite_deduction'
+    ),
+    'ALTER TABLE \`order_record\` ADD COLUMN \`invite_deduction\` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT "邀请余额抵扣金额";',
+    'SELECT "Column \`invite_deduction\` already exists in \`order_record\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @sql = (
   SELECT IF(
     NOT EXISTS (

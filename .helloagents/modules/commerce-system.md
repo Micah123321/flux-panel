@@ -19,8 +19,15 @@
 - 用户组绑定设备组，设备组保存可用隧道 ID 列表；套餐发放时同步创建或更新用户的 `user_tunnel` 授权。
 - 邀请返现比例存放在 `vite_config` 的 `invite_ratio` 和 `invite_renewal_ratio`，升级迁移只在缺失时插入默认值，不覆盖已有配置。
 
+## 引导与体验（2026-08-30 增补）
+
+- 新手引导：`/guide` 页 + `guide-checklist.tsx` 清单组件（管理员 7 步实时接口检测 / 用户 3 步）；dashboard 首次登录按角色弹出（localStorage `guide_checklist_seen_admin|user`）；商店/转发页首访 driver.js 气泡（`shop_tour_v1` / `forward_tour_v1`）。
+- 余额抵扣：`CreateOrderRequest.useInviteBalance`；`deduction = clamp(余额, 0, 应付)`；`order_record.invite_deduction` 落库；抵扣后应付为 0 时订单直接完成发放（balance-only），部分抵扣时四渠道支付金额为 `netAmount = 应付 - 抵扣`；余额扣减用 `invite_balance >= amount` 条件更新（乐观扣减），金额用 `toPlainString` 拼接。
+- 邀请返现奖励基数改为实付口径（应付 - 抵扣），无抵扣时与旧行为一致；`completePaidOrder` 到账校验与管理员确认的 `paidAmount` 同步改为实付口径。
+- 商店页购买进入支付模态框，3 秒轮询 `getMyOrders` 匹配订单状态（最长 5 分钟），到账自动刷新；`commerce-admin.tsx` 已拆分为 `commerce-admin/` 目录（index + constants + 六个 Section 子组件）。
+
 ## 验证
 
 - 前端执行 `npm run build` 通过。
-- 后端当前环境没有 `mvn`/`javac`，用 `node tests/commerce_feature_check.mjs` 做关键接入点自检。
+- 后端当前环境没有 `mvn`/`javac`，用 `node tests/commerce_feature_check.mjs` 与 `node tests/invite_balance_check.mjs` 做关键接入点与金额语义自检。
 - 每日流量限制链路用 `node tests/daily_flow_limit_check.mjs` 验证（覆盖 SQL/实体/DTO/发放/上报执行/重置恢复/前端展示的静态断言）。
