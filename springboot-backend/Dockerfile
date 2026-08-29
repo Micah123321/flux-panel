@@ -1,5 +1,8 @@
+# syntax=docker/dockerfile:1
 # 构建阶段
-FROM maven:3.9.6-eclipse-temurin-21 AS build
+# $BUILDPLATFORM 固定为构建机原生平台（amd64）。javac 产物是平台无关的字节码，
+# 因此两个目标平台共用同一次原生构建，避免 arm64 在 QEMU 模拟下执行 Maven 构建（慢 10 倍以上）。
+FROM --platform=$BUILDPLATFORM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml .
 RUN mvn -B -ntp dependency:go-offline

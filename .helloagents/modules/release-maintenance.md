@@ -9,6 +9,8 @@
 - 对外一键安装命令均指向当前仓库。
 - CI 每次 `main` push 或手动触发都会构建 GOST 二进制、前端镜像、后端镜像，并刷新 `latest` release 资产。
 - GOST 构建使用 Go 1.23.4 + setup-go 缓存，并按平台并行编译；前端/后端镜像使用 Buildx GHA 层缓存，Dockerfile 拆分依赖层，Docker context 排除本地产物。
+- 前端/后端 Dockerfile 构建阶段固定 `FROM --platform=$BUILDPLATFORM`（产物平台无关：静态文件/字节码），双平台共用原生构建结果，arm64 不再走 QEMU 模拟；workflow 配置 `concurrency` 组，同分支新推送自动取消排队/在跑的旧构建；GOST 按 UPX 压缩。
+- ARM64 为手动可选构建：`workflow_dispatch` 勾选 `build_arm64` 才构建（push 触发仅 amd64）。`BUILD_ARM64` / `DOCKER_PLATFORMS` 两个 env 控制所有条件分支；amd64-only 发布会清理 release 上的旧 `gost-arm64` 资产。注意 `install.sh` 在 arm64 主机（`aarch64|arm64` 分支）会从 release 下载 `gost-arm64`，若线上存在 arm64 节点需定期手动勾选构建。
 - 前端镜像使用 `package-lock.json` + `npm ci`；HeroUI 包版本需保持 lockfile 兼容，当前 `@heroui/input` 固定为 `2.4.29` 以匹配 `@heroui/system` 的 `useLabelPlacement` 导出。
 - 面板安装/更新会检测所有 Docker IPv4 IPAM 子网，自动避开重叠 CIDR，并将选中的 `DOCKER_IPV4_SUBNET` 写入 `.env`；Docker 检查失败时安装会显式停止，不会猜测可用网段。
 

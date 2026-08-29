@@ -239,3 +239,4 @@ gitee/
 .pnpm-store/**
 go-gost/.gocache/**
 go-gost/.gomodcache/**
+.dsh-go-build/**

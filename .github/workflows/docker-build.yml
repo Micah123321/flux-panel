@@ -5,6 +5,17 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      build_arm64:
+        description: 同时构建 ARM64（GOST 二进制与前后端镜像）
+        type: boolean
+        required: false
+        default: false
+
+# 同一分支的新推送自动取消仍在排队/运行的旧构建，避免重复编译排队
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -13,6 +24,9 @@ permissions:
 env:
   RELEASE_TAG: latest
   IMAGE_OWNER: micah123321
+  # arm64 仅在手动触发并勾选 build_arm64 时构建；push 触发默认只构建 amd64
+  BUILD_ARM64: ${{ github.event_name == 'workflow_dispatch' && inputs.build_arm64 == true }}
+  DOCKER_PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.build_arm64 == true && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
 
 jobs:
   build-gost:
@@ -37,21 +51,21 @@ jobs:
           sudo mv upx-4.2.1-amd64_linux/upx /usr/local/bin/
           rm -rf upx-4.2.1-amd64_linux*
 
-      - name: Build GOST binaries (AMD64 and ARM64)
+      - name: Build GOST binaries
         working-directory: ./go-gost
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o gost-amd64 &
-          amd64_pid=$!
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w" -o gost-arm64 &
-          arm64_pid=$!
-          wait "$amd64_pid"
-          wait "$arm64_pid"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o gost-amd64
+          if [ "$BUILD_ARM64" = "true" ]; then
+            CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w" -o gost-arm64
+          fi
 
       - name: Compress GOST binaries
         working-directory: ./go-gost
         run: |
           upx --best --lzma gost-amd64
-          upx --best --lzma gost-arm64
+          if [ "$BUILD_ARM64" = "true" ]; then
+            upx --best --lzma gost-arm64
+          fi
 
       - name: Upload GOST artifacts
         uses: actions/upload-artifact@v4
@@ -70,6 +84,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up QEMU
+        if: env.BUILD_ARM64 == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -85,7 +100,7 @@ jobs:
       - name: Build and push frontend image
         run: |
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform "$DOCKER_PLATFORMS" \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --push \
             --cache-from type=gha,scope=vite-frontend \
@@ -102,6 +117,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up QEMU
+        if: env.BUILD_ARM64 == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -117,7 +133,7 @@ jobs:
       - name: Build and push backend image
         run: |
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform "$DOCKER_PLATFORMS" \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --push \
             --cache-from type=gha,scope=backend \
@@ -148,13 +164,22 @@ jobs:
           NOTES="Main branch release for ${GITHUB_SHA}. This is the only maintained channel."
           ASSETS=(
             ./artifacts/gost-amd64
-            ./artifacts/gost-arm64
+          )
+          if [ -f ./artifacts/gost-arm64 ]; then
+            ASSETS+=("./artifacts/gost-arm64")
+          fi
+          ASSETS+=(
             ./install.sh
             ./panel_install.sh
             ./docker-compose-v4.yml
             ./docker-compose-v6.yml
             ./gost.sql
           )
+
+          # 未构建 arm64 时清理 release 中的旧 gost-arm64 资产，避免过期二进制残留
+          if [ ! -f ./artifacts/gost-arm64 ]; then
+            gh release delete-asset "${RELEASE_TAG}" gost-arm64 --yes --repo "${GITHUB_REPOSITORY}" 2>/dev/null || true
+          fi
 
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" "${ASSETS[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
