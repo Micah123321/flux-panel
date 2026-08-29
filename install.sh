@@ -200,16 +200,6 @@ install_gost() {
   if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost"; then
     exit 1
   fi
-  chmod +x "$INSTALL_DIR/gost"
-  if ! GOST_VERSION=$("$INSTALL_DIR/gost" -V 2>&1); then
-    echo "❌ 下载的 gost 无法执行：$GOST_VERSION"
-    exit 1
-  fi
-  echo "✅ 下载完成"
-
-  # 打印版本
-  echo "🔎 gost 版本：$GOST_VERSION"
-
   # 写入 config.json (安装时总是创建新的)
   CONFIG_FILE="$INSTALL_DIR/config.json"
   echo "📄 创建新配置: config.json"
@@ -219,6 +209,16 @@ install_gost() {
   "secret": "$SECRET"
 }
 EOF
+
+  chmod +x "$INSTALL_DIR/gost"
+  if ! GOST_VERSION=$(cd "$INSTALL_DIR" && ./gost -V 2>&1); then
+    echo "❌ 下载的 gost 无法执行：$GOST_VERSION"
+    exit 1
+  fi
+  echo "✅ 下载完成"
+
+  # 打印版本
+  echo "🔎 gost 版本：$GOST_VERSION"
 
   # 写入 gost.json
   GOST_CONFIG="$INSTALL_DIR/gost.json"
@@ -287,7 +287,7 @@ update_gost() {
     return 1
   fi
   chmod +x "$INSTALL_DIR/gost.new"
-  if ! GOST_VERSION=$("$INSTALL_DIR/gost.new" -V 2>&1); then
+  if ! GOST_VERSION=$(cd "$INSTALL_DIR" && ./gost.new -V 2>&1); then
     echo "❌ 下载的新版本 gost 无法执行：$GOST_VERSION"
     rm -f "$INSTALL_DIR/gost.new"
     return 1

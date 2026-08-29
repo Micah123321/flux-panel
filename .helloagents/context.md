@@ -1,6 +1,6 @@
 # 项目上下文
 
-flux-panel 当前维护仓库为 `Micah123321/flux-panel`，主分支 `main` 是唯一维护与发布通道。项目只保留单一公开安装入口。
+flux-panel 当前维护仓库为 `Micah123321/flux-panel`，主分支 `main` 是唯一维护与发布通道。项目只保留单一公开安装入口，面板为 Web / H5，不再包含 Android / iOS 原生客户端。
 
 安装链路约定：
 

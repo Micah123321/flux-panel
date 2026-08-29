@@ -15,7 +15,6 @@ import ConfigPage from "@/pages/config";
 import CommercePage from "@/pages/commerce";
 import CommerceAdminPage from "@/pages/commerce-admin";
 import RegisterPage from "@/pages/register";
-import { SettingsPage } from "@/pages/settings";
 
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
@@ -250,10 +249,7 @@ function App() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/settings"
-        element={<SettingsPage />}
-      />
+
     </Routes>
   );
 }

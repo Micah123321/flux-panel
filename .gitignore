@@ -1,7 +1,6 @@
 # ==========================================
 # 操作系统生成的文件
 # ==========================================
-flutter_app/
 
 # macOS
 .DS_Store
@@ -234,12 +233,9 @@ go-gost/gost.json
 *.tmp
 *.temp
 .cache/
-
-
 gitee/
-
-
 .helloagents/**
-
 .npm-cache/**
 .pnpm-store/**
+go-gost/.gocache/**
+go-gost/.gomodcache/**

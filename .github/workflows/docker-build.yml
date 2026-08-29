@@ -20,21 +20,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          go-version: '1.23.4'
+          cache: true
+          cache-dependency-path: ./go-gost/go.sum
 
       - name: Install UPX
         run: |
@@ -43,13 +37,15 @@ jobs:
           sudo mv upx-4.2.1-amd64_linux/upx /usr/local/bin/
           rm -rf upx-4.2.1-amd64_linux*
 
-      - name: Build GOST binary (AMD64)
+      - name: Build GOST binaries (AMD64 and ARM64)
         working-directory: ./go-gost
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o gost-amd64
-
-      - name: Build GOST binary (ARM64)
-        working-directory: ./go-gost
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w" -o gost-arm64
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o gost-amd64 &
+          amd64_pid=$!
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w" -o gost-arm64 &
+          arm64_pid=$!
+          wait "$amd64_pid"
+          wait "$arm64_pid"
 
       - name: Compress GOST binaries
         working-directory: ./go-gost
@@ -70,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -90,6 +88,8 @@ jobs:
             --platform linux/amd64,linux/arm64 \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --push \
+            --cache-from type=gha,scope=vite-frontend \
+            --cache-to type=gha,scope=vite-frontend,mode=max \
             -t ghcr.io/${IMAGE_OWNER}/vite-frontend:latest \
             ./vite-frontend
 
@@ -98,6 +98,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -118,6 +120,8 @@ jobs:
             --platform linux/amd64,linux/arm64 \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --push \
+            --cache-from type=gha,scope=backend \
+            --cache-to type=gha,scope=backend,mode=max \
             -t ghcr.io/${IMAGE_OWNER}/springboot-backend:latest \
             ./springboot-backend
 
@@ -127,6 +131,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Download GOST artifacts
         uses: actions/download-artifact@v4

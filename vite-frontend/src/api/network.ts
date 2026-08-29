@@ -1,39 +1,7 @@
 import axios, { AxiosResponse } from 'axios';
-import { getPanelAddresses, isWebViewFunc} from '@/utils/panel';
 
-
-interface PanelAddress {
-  name: string;
-  address: string;   
-  inx: boolean;
-}
-
-const setPanelAddressesFunc = (newAddress: PanelAddress[]) => {
-  newAddress.forEach(item => {
-    if (item.inx) {
-      baseURL = `${item.address}/api/v1/`;
-      axios.defaults.baseURL = baseURL;
-    }
-  });
-}
-
-function getWebViewPanelAddress() {
-  (window as any).setAddresses = setPanelAddressesFunc
-  getPanelAddresses("setAddresses");
-};
-
-let baseURL: string = '';
-
-export const reinitializeBaseURL = () => {
-  if (isWebViewFunc()) {
-    getWebViewPanelAddress();
-  } else {
-    baseURL = import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/api/v1/` : '/api/v1/';
-    axios.defaults.baseURL = baseURL;
-  }
-};
-
-reinitializeBaseURL();
+const baseURL: string = import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/api/v1/` : '/api/v1/';
+axios.defaults.baseURL = baseURL;
 
 
 interface ApiResponse<T = any> {
@@ -66,12 +34,6 @@ function isTokenExpired(response: ApiResponse) {
 const Network = {
   get: function<T = any>(path: string = '', data: any = {}): Promise<ApiResponse<T>> {
     return new Promise(function(resolve) {
-      // 如果baseURL是默认值且是WebView环境，说明没有设置面板地址
-      if (baseURL === '') {
-        resolve({"code": -1, "msg": " - 请先设置面板地址", "data": null as T});
-        return;
-      }
-
       axios.get(path, {
         params: data,
         timeout: 30000,
@@ -103,12 +65,6 @@ const Network = {
 
   post: function<T = any>(path: string = '', data: any = {}): Promise<ApiResponse<T>> {
     return new Promise(function(resolve) {
-      // 如果baseURL是默认值且是WebView环境，说明没有设置面板地址
-      if (baseURL === '') {
-        resolve({"code": -1, "msg": " - 请先设置面板地址", "data": null as T});
-        return;
-      }
-
       axios.post(path, data, {
         timeout: 30000,
         headers: {
