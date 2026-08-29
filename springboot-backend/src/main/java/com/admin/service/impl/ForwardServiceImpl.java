@@ -114,6 +114,89 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     @Override
+    public R createForwards(List<ForwardDto> forwards) {
+        if (forwards == null || forwards.isEmpty()) {
+            return R.err("请提供要添加的转发列表");
+        }
+
+        List<Map<String, Object>> successList = new ArrayList<>();
+        List<Map<String, Object>> failedList = new ArrayList<>();
+
+        for (int i = 0; i < forwards.size(); i++) {
+            ForwardDto forwardDto = forwards.get(i);
+            int index = i + 1;
+            String name = forwardDto == null ? "" : forwardDto.getName();
+            String validationError = validateCreateForwardDto(forwardDto);
+            if (validationError != null) {
+                addCreateFailure(failedList, index, name, validationError);
+                continue;
+            }
+
+            R result = createForward(forwardDto);
+            if (result.getCode() == 0) {
+                addCreateSuccess(successList, index, forwardDto.getName());
+            } else {
+                addCreateFailure(failedList, index, forwardDto.getName(), result.getMsg());
+            }
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("total", forwards.size());
+        data.put("successCount", successList.size());
+        data.put("failedCount", failedList.size());
+        data.put("success", successList);
+        data.put("failed", failedList);
+
+        if (failedList.isEmpty()) {
+            return R.ok(data);
+        }
+
+        // ha-min: 批量创建逐条复用单条创建链路，保持 GOST/DB 现有非事务语义和失败明细。
+        R res = R.err("部分或全部转发创建失败");
+        res.setData(data);
+        return res;
+    }
+
+    private String validateCreateForwardDto(ForwardDto forwardDto) {
+        if (forwardDto == null) {
+            return "转发数据不能为空";
+        }
+        if (isBlank(forwardDto.getName())) {
+            return "转发名称不能为空";
+        }
+        if (forwardDto.getTunnelId() == null) {
+            return "隧道ID不能为空";
+        }
+        if (isBlank(forwardDto.getRemoteAddr())) {
+            return "远程地址不能为空";
+        }
+        Integer inPort = forwardDto.getInPort();
+        if (inPort != null && (inPort < 1 || inPort > 65535)) {
+            return "端口号必须在1-65535之间";
+        }
+        return null;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private void addCreateSuccess(List<Map<String, Object>> successList, int index, String name) {
+        Map<String, Object> success = new HashMap<>();
+        success.put("index", index);
+        success.put("name", name);
+        successList.add(success);
+    }
+
+    private void addCreateFailure(List<Map<String, Object>> failedList, int index, String name, String reason) {
+        Map<String, Object> failed = new HashMap<>();
+        failed.put("index", index);
+        failed.put("name", name);
+        failed.put("reason", reason == null ? "创建失败" : reason);
+        failedList.add(failed);
+    }
+
+    @Override
     public R getAllForwards() {
         UserInfo currentUser = getCurrentUserInfo();
 

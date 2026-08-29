@@ -25,6 +25,13 @@ public interface ForwardService extends IService<Forward> {
     R createForward(ForwardDto forwardDto);
 
     /**
+     * 批量创建端口转发
+     * @param forwards 转发数据列表
+     * @return 结果：data 包含 total/success/failed 明细
+     */
+    R createForwards(List<ForwardDto> forwards);
+
+    /**
      * 获取端口转发列表
      * @return 结果
      */

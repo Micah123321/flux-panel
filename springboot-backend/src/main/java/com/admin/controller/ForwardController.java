@@ -36,6 +36,13 @@ public class ForwardController extends BaseController {
     }
 
     @LogAnnotation
+    @PostMapping("/batch-create")
+    public R batchCreate(@RequestBody Map<String, List<ForwardDto>> params) {
+        List<ForwardDto> forwards = params == null ? null : params.get("forwards");
+        return forwardService.createForwards(forwards);
+    }
+
+    @LogAnnotation
     @PostMapping("/list")
     public R readAll() {
         return forwardService.getAllForwards();

@@ -51,6 +51,7 @@ export const userTunnel = () => Network.post("/tunnel/user/tunnel");
 
 // 转发CRUD操作 - 全部使用POST请求
 export const createForward = (data: any) => Network.post("/forward/create", data);
+export const batchCreateForwards = (forwards: any[]) => Network.post("/forward/batch-create", { forwards });
 export const getForwardList = () => Network.post("/forward/list");
 export const updateForward = (data: any) => Network.post("/forward/update", data);
 export const deleteForward = (id: number) => Network.post("/forward/delete", { id });
@@ -89,4 +90,4 @@ export const updateConfig = (name: string, value: string) => Network.post("/conf
 // 验证码相关接口
 export const checkCaptcha = () => Network.post("/captcha/check");
 export const generateCaptcha = () => Network.post(`/captcha/generate`);
-export const verifyCaptcha = (data: { captchaId: string; trackData: string }) => Network.post("/captcha/verify", data); 
+export const verifyCaptcha = (data: { captchaId: string; trackData: string }) => Network.post("/captcha/verify", data);

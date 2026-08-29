@@ -7,6 +7,7 @@
 - 前端只展示单一项目版本，不按客户端环境切换版本号。
 - 对外一键安装命令均指向当前仓库。
 - CI 每次 `main` push 或手动触发都会构建 GOST 二进制、前端镜像、后端镜像，并刷新 `latest` release 资产。
+- 前端镜像使用 `package-lock.json` + `npm ci`；HeroUI 包版本需保持 lockfile 兼容，当前 `@heroui/input` 固定为 `2.4.29` 以匹配 `@heroui/system` 的 `useLabelPlacement` 导出。
 
 ## 安装资产
 
