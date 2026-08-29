@@ -317,6 +317,53 @@ generate_random() {
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c16
 }
 
+# 读取 .env 配置到当前 shell 并导出（更新/卸载前必须执行，否则 compose 以空变量渲染）。
+load_env_file() {
+  if [[ -f ".env" ]]; then
+    set -a
+    source .env
+    set +a
+  fi
+}
+
+# 校验更新所需的关键配置是否齐全，避免空变量部署。
+validate_env() {
+  local key missing=""
+  for key in DB_NAME DB_USER DB_PASSWORD JWT_SECRET FRONTEND_PORT BACKEND_PORT; do
+    if [[ -z "${!key:-}" ]]; then
+      missing="$missing $key"
+    fi
+  done
+  if [[ -n "$missing" ]]; then
+    echo "❌ .env 缺少以下配置:$missing"
+    echo "   请补全 .env 后重试，或切换到面板安装目录执行更新。"
+    return 1
+  fi
+}
+
+# 计算当前 compose 项目名（近似 docker compose 默认规则：目录名小写并去掉非法字符）。
+# ha-min: 仅覆盖常见目录名场景；特殊字符目录名下与 compose 实际项目名可能不一致，
+#         后果只是把本项目的容器误判为残留并重建一次，数据仍在命名卷中不受影响。
+compose_project_name() {
+  local name="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+  name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+  printf '%s' "${name:-default}"
+}
+
+# 清理归属其他 compose 项目、但占用了本面板固定容器名的残留容器。
+# 面板数据保存在命名卷（mysql_data/backend_logs）中，删除容器不会丢失数据。
+remove_stale_containers() {
+  local cname project_label current_project
+  current_project=$(compose_project_name)
+  for cname in gost-mysql springboot-backend vite-frontend; do
+    project_label=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$cname" 2>/dev/null || true)
+    if [[ -n "$project_label" && "$project_label" != "$current_project" ]]; then
+      echo "🧹 清理残留容器 $cname（属于项目 $project_label，与当前项目 $current_project 容器名冲突）..."
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # 删除脚本自身
 delete_self() {
   echo ""
@@ -402,6 +449,18 @@ update_panel() {
   echo "🔄 开始更新面板..."
   check_docker
 
+  # 加载已有 .env（数据库凭据、端口等）。缺失时 compose 会以空变量渲染：
+  # 端口映射为空，并按当前目录解析项目名，导致容器名冲突、更新失败。
+  load_env_file
+  if [[ ! -f ".env" ]]; then
+    echo "❌ 未找到 .env 文件，无法在此目录更新。"
+    if docker ps --format "{{.Names}}" | grep -q "gost-mysql"; then
+      echo "💡 检测到面板容器正在运行，面板可能安装在其他目录，请切换到安装目录（含 .env）后重试。"
+    fi
+    return 1
+  fi
+  validate_env || return 1
+
   echo "🔽 下载最新配置文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
@@ -415,15 +474,18 @@ update_panel() {
   fi
 
   echo "🛑 停止当前服务..."
-  $DOCKER_CMD down
+  $DOCKER_CMD down --remove-orphans
 
   ensure_docker_ipv4_subnet
+
+  # 历史版本可能从其他目录安装过（容器同名但归属旧项目），先清理再启动。
+  remove_stale_containers
 
   echo "⬇️ 拉取最新镜像..."
   $DOCKER_CMD pull
 
   echo "🚀 启动更新后的服务..."
-  $DOCKER_CMD up -d
+  $DOCKER_CMD up -d --remove-orphans
 
   # 等待服务启动
   echo "⏳ 等待服务启动..."
@@ -1668,6 +1730,12 @@ export_migration_sql() {
 uninstall_panel() {
   echo "🗑️ 开始卸载面板..."
   check_docker
+
+  # 加载 .env 以定位正确的 compose 项目，否则卸载会漏掉已运行的容器与卷。
+  load_env_file
+  if [[ ! -f ".env" ]]; then
+    echo "⚠️ 未找到 .env 文件，将仅按当前目录解析项目执行卸载；若面板安装在其他目录，请到该目录执行卸载。"
+  fi
 
   if [[ ! -f "docker-compose.yml" ]]; then
     echo "⚠️ 未找到 docker-compose.yml 文件，正在下载以完成卸载..."
