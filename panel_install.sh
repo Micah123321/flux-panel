@@ -43,6 +43,144 @@ download_file() {
 
 
 
+# 将 IPv4 地址转换为整数，便于比较 CIDR 区间。
+ipv4_to_int() {
+  local address="$1"
+  local IFS=.
+  local first second third fourth extra
+
+  read -r first second third fourth extra <<< "$address"
+  if [[ -n "$extra" || -z "$first" || -z "$second" || -z "$third" || -z "$fourth" ]]; then
+    return 1
+  fi
+
+  local octet
+  for octet in "$first" "$second" "$third" "$fourth"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    ((10#$octet <= 255)) || return 1
+  done
+
+  printf '%s\n' "$(( (10#$first << 24) + (10#$second << 16) + (10#$third << 8) + 10#$fourth ))"
+}
+
+# 输出 IPv4 CIDR 的起止整数区间。
+ipv4_cidr_to_range() {
+  local cidr="$1"
+  local address="${cidr%/*}"
+  local prefix="${cidr#*/}"
+
+  [[ "$cidr" == */* && "$prefix" =~ ^[0-9]+$ ]] || return 1
+  prefix=$((10#$prefix))
+  ((prefix >= 0 && prefix <= 32)) || return 1
+
+  local address_int
+  address_int=$(ipv4_to_int "$address") || return 1
+
+  local size=$((1 << (32 - prefix)))
+  local start=$((address_int & ~(size - 1)))
+  local end=$((start + size - 1))
+  printf '%s %s\n' "$start" "$end"
+}
+
+# 判断两个 IPv4 CIDR 是否有重叠。
+ipv4_cidrs_overlap() {
+  local first_range second_range
+  first_range=$(ipv4_cidr_to_range "$1") || return 1
+  second_range=$(ipv4_cidr_to_range "$2") || return 1
+
+  local first_start first_end second_start second_end
+  read -r first_start first_end <<< "$first_range"
+  read -r second_start second_end <<< "$second_range"
+  [[ "$first_start" -le "$second_end" && "$second_start" -le "$first_end" ]]
+}
+
+# 获取当前 Docker 网络的 IPv4 子网，忽略 IPv6 与空 IPAM 配置。
+get_docker_ipv4_subnets() {
+  local network_ids inspected
+  network_ids=$(docker network ls -q) || return 1
+  [[ -n "$network_ids" ]] || return 0
+
+  inspected=$(docker network inspect $network_ids --format '{{range .IPAM.Config}}{{.Subnet}}{{println}}{{end}}' 2>/dev/null) || return 1
+  grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' <<< "$inspected" || true
+}
+
+# 返回 0 代表 candidate 未与任何现有 Docker IPv4 子网重叠。
+docker_ipv4_subnet_available() {
+  local candidate="$1"
+  local used_subnets subnet
+  used_subnets=$(get_docker_ipv4_subnets) || return 1
+
+  while IFS= read -r subnet; do
+    [[ -z "$subnet" ]] && continue
+    if ipv4_cidrs_overlap "$candidate" "$subnet"; then
+      return 1
+    fi
+  done <<< "$used_subnets"
+
+  return 0
+}
+
+# 从私有地址池选择一个不与现有 Docker 网络重叠的 /16。
+select_available_docker_ipv4_subnet() {
+  echo "🔍 检测 Docker IPv4 子网冲突..."
+  if ! docker network ls >/dev/null 2>&1; then
+    echo "❌ 无法读取 Docker 网络，请确认 Docker 服务正在运行且当前用户有权限访问。"
+    return 1
+  fi
+
+  local second candidate
+  for second in {16..31}; do
+    candidate="172.${second}.0.0/16"
+    if docker_ipv4_subnet_available "$candidate"; then
+      DOCKER_IPV4_SUBNET="$candidate"
+      echo "✅ 已选择可用 Docker IPv4 子网: $DOCKER_IPV4_SUBNET"
+      return 0
+    fi
+  done
+
+  for second in {240..255}; do
+    candidate="10.${second}.0.0/16"
+    if docker_ipv4_subnet_available "$candidate"; then
+      DOCKER_IPV4_SUBNET="$candidate"
+      echo "✅ 已选择可用 Docker IPv4 子网: $DOCKER_IPV4_SUBNET"
+      return 0
+    fi
+  done
+
+  echo "❌ 未找到可用 Docker IPv4 子网，请清理冲突网络或手动指定子网后重试。"
+  return 1
+}
+
+# 更新时优先复用原子网；子网缺失、非法或冲突时重新选择并持久化。
+ensure_docker_ipv4_subnet() {
+  local configured_subnet=""
+  if [[ -f .env ]]; then
+    configured_subnet=$(sed -n 's/^DOCKER_IPV4_SUBNET=//p' .env | tail -n 1)
+  fi
+
+  if [[ -n "$configured_subnet" ]] && ipv4_cidr_to_range "$configured_subnet" >/dev/null && docker_ipv4_subnet_available "$configured_subnet"; then
+    DOCKER_IPV4_SUBNET="$configured_subnet"
+    echo "✅ 复用现有 Docker IPv4 子网: $DOCKER_IPV4_SUBNET"
+    return 0
+  fi
+
+  if [[ -n "$configured_subnet" ]]; then
+    echo "⚠️ 原 Docker IPv4 子网不可用，正在重新选择。"
+  fi
+  select_available_docker_ipv4_subnet
+
+  if [[ -f .env ]]; then
+    local temp_env
+    temp_env=$(mktemp .env.XXXXXX)
+    if grep -q '^DOCKER_IPV4_SUBNET=' .env; then
+      awk -v subnet="$DOCKER_IPV4_SUBNET" '{if ($0 ~ /^DOCKER_IPV4_SUBNET=/) print "DOCKER_IPV4_SUBNET=" subnet; else print}' .env > "$temp_env"
+    else
+      cat .env > "$temp_env"
+      printf '\nDOCKER_IPV4_SUBNET=%s\n' "$DOCKER_IPV4_SUBNET" >> "$temp_env"
+    fi
+    mv "$temp_env" .env
+  fi
+}
 # 根据IPv6支持情况选择docker-compose URL
 get_docker_compose_url() {
   if check_ipv6_support > /dev/null 2>&1; then
@@ -234,6 +372,8 @@ install_panel() {
     configure_docker_ipv6
   fi
 
+  select_available_docker_ipv4_subnet
+
   cat > .env <<EOF
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
@@ -241,6 +381,7 @@ DB_PASSWORD=$DB_PASSWORD
 JWT_SECRET=$JWT_SECRET
 FRONTEND_PORT=$FRONTEND_PORT
 BACKEND_PORT=$BACKEND_PORT
+DOCKER_IPV4_SUBNET=$DOCKER_IPV4_SUBNET
 EOF
 
   echo "🚀 启动 docker 服务..."
@@ -275,6 +416,8 @@ update_panel() {
 
   echo "🛑 停止当前服务..."
   $DOCKER_CMD down
+
+  ensure_docker_ipv4_subnet
 
   echo "⬇️ 拉取最新镜像..."
   $DOCKER_CMD pull
@@ -1135,5 +1278,7 @@ main() {
   done
 }
 
-# 执行主函数
-main
+# 仅在直接执行时进入交互菜单，便于脚本函数自检。
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi
