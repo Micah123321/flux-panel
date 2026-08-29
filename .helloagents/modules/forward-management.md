@@ -6,6 +6,27 @@
 删除转发涉及两步：先删 GOST 节点上的服务（`deleteGostServices`），再删数据库记录；
 强制删除（force-delete）跳过 GOST 验证直接删记录，用于节点失联时的兜底。
 
+## 聚合转发（2026-08-29 新增）
+
+### 数据模型
+- `AggregateNodeGroup`（表 `aggregate_node_group`）保存节点组名称、成员 `nodeIds` 和备注；成员是现有 `Node` 记录，因此同一物理节点可通过多次安装形成多个设备成员。
+- `AggregateForward`（表 `aggregate_forward`）保存入口节点组、出口节点组、手动入口 IP/域名列表、入口/出口端口范围、模式、倍率、网卡、备注、状态与聚合流量。
+- 初始化安装用 `gost.sql`，老部署更新用 `panel_install.sh` 的 `CREATE TABLE IF NOT EXISTS` 幂等迁移创建两张表。
+
+### 后端接口
+- 节点组：`POST /api/v1/aggregate-node-group/create|list|update|delete`，仅管理员可操作。运行中的聚合转发引用节点组时禁止修改成员，避免 GOST 服务与数据库状态分叉。
+- 聚合转发：`POST /api/v1/aggregate-forward/create|list|update|delete|pause|resume`，仅管理员可操作。
+- 模式：`load_balance` 映射 GOST selector `round`；`failover` 映射 GOST selector `fifo`，按出口组成员顺序主备。
+- 服务编排：每个入口节点、每个入口端口创建 TCP/UDP 服务，远端目标展开为出口组所有节点的 `serverIp/ip:targetPort`。一次端口跨度上限为 200。
+- 端口占用：聚合转发创建会检查入口节点允许端口范围、普通转发已占用端口、其他聚合转发入口范围；普通转发分配端口时也会纳入聚合占用。
+- 流量统计：聚合服务名为 `agf_<聚合ID>_<入口端口>`，`FlowController` 对该前缀单独累加 `aggregate_forward.in_flow/out_flow` 并应用倍率，不扣普通用户/隧道配额。
+
+### 前端
+- `/aggregate-forward` 页面同时管理节点组和聚合转发。
+- 入口 IP/域名由用户手动填写，支持逗号、空格、换行分隔；系统不托管 DNS、TLS 证书或反代。
+- 聚合规则卡片展示入口/出口组、端口范围、模式、倍率、服务数量、入口地址和聚合流量。
+
+
 ## 批量新增（2026-08-28 新增）
 
 ### 后端

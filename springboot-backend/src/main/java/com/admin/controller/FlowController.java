@@ -8,6 +8,7 @@ import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.common.utils.AESCrypto;
 import com.admin.common.utils.GostUtil;
 import com.admin.entity.*;
+import com.admin.service.AggregateForwardService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -64,6 +65,9 @@ public class FlowController extends BaseController {
 
     @Resource
     CheckGostConfigAsync checkGostConfigAsync;
+
+    @Resource
+    private AggregateForwardService aggregateForwardService;
 
     /**
      * 加密消息包装器
@@ -213,7 +217,14 @@ public class FlowController extends BaseController {
      * 处理流量数据的核心逻辑
      */
     private String processFlowData(FlowDto flowDataList) {
+        if (flowDataList.getN() != null && flowDataList.getN().startsWith("agf_")) {
+            return processAggregateFlowData(flowDataList);
+        }
+
         String[] serviceIds = parseServiceName(flowDataList.getN());
+        if (serviceIds.length < 3) {
+            return SUCCESS_RESPONSE;
+        }
         String forwardId = serviceIds[0];
         String userId = serviceIds[1];
         String userTunnelId = serviceIds[2];
@@ -239,6 +250,44 @@ public class FlowController extends BaseController {
         }
 
         return SUCCESS_RESPONSE;
+    }
+
+    private String processAggregateFlowData(FlowDto flowDataList) {
+        String[] serviceIds = parseServiceName(flowDataList.getN());
+        if (serviceIds.length < 3) {
+            return SUCCESS_RESPONSE;
+        }
+
+        String aggregateForwardId = serviceIds[1];
+        AggregateForward aggregateForward = aggregateForwardService.getById(aggregateForwardId);
+        if (aggregateForward == null) {
+            return SUCCESS_RESPONSE;
+        }
+
+        FlowDto flowStats = filterAggregateFlowData(flowDataList, aggregateForward);
+        updateAggregateForwardFlow(aggregateForwardId, flowStats);
+        return SUCCESS_RESPONSE;
+    }
+
+    private FlowDto filterAggregateFlowData(FlowDto flowDto, AggregateForward aggregateForward) {
+        BigDecimal trafficRatio = aggregateForward.getTrafficRatio() == null ? BigDecimal.ONE : aggregateForward.getTrafficRatio();
+        long down = flowDto.getD() == null ? 0L : flowDto.getD();
+        long up = flowDto.getU() == null ? 0L : flowDto.getU();
+        BigDecimal originalD = BigDecimal.valueOf(down);
+        BigDecimal originalU = BigDecimal.valueOf(up);
+        flowDto.setD(originalD.multiply(trafficRatio).longValue());
+        flowDto.setU(originalU.multiply(trafficRatio).longValue());
+        return flowDto;
+    }
+
+    private void updateAggregateForwardFlow(String aggregateForwardId, FlowDto flowStats) {
+        synchronized (getForwardLock("agf_" + aggregateForwardId)) {
+            UpdateWrapper<AggregateForward> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", aggregateForwardId);
+            updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
+            updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
+            aggregateForwardService.update(null, updateWrapper);
+        }
     }
 
     private void checkUserRelatedLimits(String userId, String name) {

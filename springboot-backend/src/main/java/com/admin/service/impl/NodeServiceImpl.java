@@ -7,9 +7,11 @@ import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.common.utils.WebSocketServer;
+import com.admin.entity.AggregateNodeGroup;
 import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
+import com.admin.mapper.AggregateNodeGroupMapper;
 import com.admin.mapper.NodeMapper;
 import com.admin.mapper.TunnelMapper;
 import com.admin.service.NodeService;
@@ -70,6 +72,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     @Resource
     private TunnelMapper tunnelMapper;
+
+    @Resource
+    private AggregateNodeGroupMapper aggregateNodeGroupMapper;
 
     @Resource
     @Lazy
@@ -289,7 +294,12 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 检查出口节点使用情况
-        return checkOutNodeUsage(nodeId);
+        R outNodeCheckResult = checkOutNodeUsage(nodeId);
+        if (outNodeCheckResult.getCode() != 0) {
+            return outNodeCheckResult;
+        }
+
+        return checkAggregateNodeGroupUsage(nodeId);
     }
 
     /**
@@ -327,6 +337,22 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             return R.err(errorMsg);
         }
 
+        return R.ok();
+    }
+
+    private R checkAggregateNodeGroupUsage(Long nodeId) {
+        List<AggregateNodeGroup> groups = aggregateNodeGroupMapper.selectList(new QueryWrapper<AggregateNodeGroup>());
+        for (AggregateNodeGroup group : groups) {
+            String nodeIds = group.getNodeIds();
+            if (nodeIds == null || nodeIds.trim().isEmpty()) {
+                continue;
+            }
+            for (String value : nodeIds.split(",")) {
+                if (value.trim().equals(String.valueOf(nodeId))) {
+                    return R.err("该节点正在聚合节点组 " + group.getName() + " 中使用，请先移出节点组");
+                }
+            }
+        }
         return R.ok();
     }
 

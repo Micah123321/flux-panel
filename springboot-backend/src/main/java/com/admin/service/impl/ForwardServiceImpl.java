@@ -9,6 +9,8 @@ import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
+import com.admin.mapper.AggregateForwardMapper;
+import com.admin.mapper.AggregateNodeGroupMapper;
 import com.admin.mapper.ForwardMapper;
 import com.admin.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -61,6 +63,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Resource
     NodeService nodeService;
+
+    @Resource
+    private AggregateForwardMapper aggregateForwardMapper;
+
+    @Resource
+    private AggregateNodeGroupMapper aggregateNodeGroupMapper;
 
 
     @Override
@@ -1489,9 +1497,35 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
         }
 
+        collectAggregateForwardPortsOnNode(nodeId, usedPorts);
         return usedPorts;
     }
 
+
+    private void collectAggregateForwardPortsOnNode(Long nodeId, Set<Integer> usedPorts) {
+        List<AggregateForward> aggregateForwards = aggregateForwardMapper.selectList(new QueryWrapper<>());
+        for (AggregateForward aggregateForward : aggregateForwards) {
+            AggregateNodeGroup group = aggregateNodeGroupMapper.selectById(aggregateForward.getEntryGroupId());
+            if (!aggregateGroupContainsNode(group, nodeId)) {
+                continue;
+            }
+            for (int port = aggregateForward.getEntryPortStart(); port <= aggregateForward.getEntryPortEnd(); port++) {
+                usedPorts.add(port);
+            }
+        }
+    }
+
+    private boolean aggregateGroupContainsNode(AggregateNodeGroup group, Long nodeId) {
+        if (group == null || group.getNodeIds() == null || group.getNodeIds().trim().isEmpty()) {
+            return false;
+        }
+        for (String value : group.getNodeIds().split(",")) {
+            if (value.trim().equals(String.valueOf(nodeId))) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * 构建服务名称，优化后减少重复查询
