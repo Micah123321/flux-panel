@@ -25,8 +25,14 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * <p>
@@ -110,6 +116,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Resource
     ViteConfigService viteConfigService;
+
+    @Resource
+    @Lazy
+    private ForwardService forwardService;
 
     @Resource
     StatisticsFlowService statisticsFlowService;
@@ -701,6 +711,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         userInfo.setFlow(user.getFlow());
         userInfo.setInFlow(user.getInFlow());
         userInfo.setOutFlow(user.getOutFlow());
+        userInfo.setDailyFlow(user.getDailyFlow());
+        userInfo.setDailyInFlow(user.getDailyInFlow());
+        userInfo.setDailyOutFlow(user.getDailyOutFlow());
         userInfo.setNum(user.getNum());
         userInfo.setExpTime(user.getExpTime());
         userInfo.setFlowResetTime(user.getFlowResetTime());
@@ -785,6 +798,108 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             // 解析失败，返回当前小时
         }
         return getCurrentHour();
+    }
+
+    @Override
+    public R getAdminSummary() {
+        try {
+            AdminSummaryDto dto = new AdminSummaryDto();
+
+            // 1. 用户统计
+            List<User> users = this.list();
+            AdminSummaryDto.TotalsDto totals = new AdminSummaryDto.TotalsDto();
+            totals.setUserCount(users.size());
+            long totalUsedFlow = 0L;
+            for (User u : users) {
+                if (u.getStatus() != null && u.getStatus() == USER_STATUS_ACTIVE) {
+                    totals.setActiveUsers(totals.getActiveUsers() + 1);
+                } else {
+                    totals.setDisabledUsers(totals.getDisabledUsers() + 1);
+                }
+                totalUsedFlow += (u.getInFlow() == null ? 0L : u.getInFlow()) + (u.getOutFlow() == null ? 0L : u.getOutFlow());
+            }
+
+            // 2. 转发/隧道/节点统计
+            List<Forward> forwards = forwardService.list();
+            totals.setForwardCount(forwards.size());
+            totals.setTunnelCount(tunnelService.count());
+            totals.setNodeCount(nodeService.count());
+            totals.setTotalUsedFlow(totalUsedFlow);
+            dto.setTotals(totals);
+
+            // 3. 隧道用量统计（user_tunnel 为主，forward 计数补充，tunnel 表补名称）
+            Map<Integer, AdminSummaryDto.TunnelStatDto> tunnelStatMap = new LinkedHashMap<>();
+            for (Tunnel tunnel : tunnelService.list()) {
+                AdminSummaryDto.TunnelStatDto ts = new AdminSummaryDto.TunnelStatDto();
+                ts.setTunnelId(tunnel.getId().intValue());
+                ts.setTunnelName(tunnel.getName());
+                tunnelStatMap.put(ts.getTunnelId(), ts);
+            }
+            Map<Integer, Set<Integer>> tunnelUsers = new HashMap<>();
+            for (UserTunnel ut : userTunnelService.list()) {
+                Set<Integer> set = tunnelUsers.computeIfAbsent(ut.getTunnelId(), k -> new HashSet<>());
+                set.add(ut.getUserId());
+                AdminSummaryDto.TunnelStatDto ts = tunnelStatMap.get(ut.getTunnelId());
+                if (ts != null) {
+                    ts.setUsedFlow(ts.getUsedFlow() + (ut.getInFlow() == null ? 0L : ut.getInFlow()) + (ut.getOutFlow() == null ? 0L : ut.getOutFlow()));
+                }
+            }
+            for (Forward f : forwards) {
+                AdminSummaryDto.TunnelStatDto ts = tunnelStatMap.get(f.getTunnelId());
+                if (ts != null) {
+                    ts.setForwardCount(ts.getForwardCount() + 1);
+                }
+            }
+            List<AdminSummaryDto.TunnelStatDto> tunnelStats = new ArrayList<>(tunnelStatMap.values());
+            for (AdminSummaryDto.TunnelStatDto ts : tunnelStats) {
+                Set<Integer> us = tunnelUsers.get(ts.getTunnelId());
+                ts.setUserCount(us == null ? 0 : us.size());
+            }
+            tunnelStats.sort((a, b) -> Long.compare(b.getUsedFlow(), a.getUsedFlow()));
+            dto.setTunnelStats(tunnelStats);
+
+            // 4. 用户用量排行（按已用流量取前10）
+            Map<Integer, Long> userForwardCount = new HashMap<>();
+            for (Forward f : forwards) {
+                if (f.getUserId() != null) {
+                    userForwardCount.merge(f.getUserId(), 1L, Long::sum);
+                }
+            }
+            List<AdminSummaryDto.TopUserDto> topUsers = new ArrayList<>();
+            for (User u : users) {
+                AdminSummaryDto.TopUserDto tu = new AdminSummaryDto.TopUserDto();
+                tu.setUserId(u.getId());
+                tu.setUserName(u.getUser());
+                tu.setStatus(u.getStatus());
+                tu.setFlowQuota(u.getFlow());
+                tu.setUsedFlow((u.getInFlow() == null ? 0L : u.getInFlow()) + (u.getOutFlow() == null ? 0L : u.getOutFlow()));
+                tu.setForwardCount(userForwardCount.getOrDefault(u.getId().intValue(), 0L));
+                topUsers.add(tu);
+            }
+            topUsers.sort((a, b) -> Long.compare(b.getUsedFlow(), a.getUsedFlow()));
+            dto.setTopUsers(topUsers.size() > 10 ? topUsers.subList(0, 10) : topUsers);
+
+            // 5. 全站小时流量趋势（statistics_flow 保留48小时，按小时聚合求和）
+            List<StatisticsFlow> flows = statisticsFlowService.list();
+            Map<String, Long> hourFlowMap = new LinkedHashMap<>();
+            for (StatisticsFlow sf : flows) {
+                hourFlowMap.merge(sf.getTime(), sf.getFlow() == null ? 0L : sf.getFlow(), Long::sum);
+            }
+            List<AdminSummaryDto.HourFlowDto> recentFlows = new ArrayList<>();
+            for (Map.Entry<String, Long> entry : hourFlowMap.entrySet()) {
+                AdminSummaryDto.HourFlowDto hf = new AdminSummaryDto.HourFlowDto();
+                hf.setTime(entry.getKey());
+                hf.setFlow(entry.getValue());
+                recentFlows.add(hf);
+            }
+            recentFlows.sort(Comparator.comparing(AdminSummaryDto.HourFlowDto::getTime));
+            dto.setRecentFlows(recentFlows);
+
+            return R.ok(dto);
+        } catch (Exception e) {
+            log.error("获取管理员全站汇总失败", e);
+            return R.err("获取全站汇总失败");
+        }
     }
 
 

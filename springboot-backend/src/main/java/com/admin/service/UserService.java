@@ -29,4 +29,6 @@ public interface UserService extends IService<User> {
     R updatePassword(ChangePasswordDto changePasswordDto);
 
     R reset(ResetFlowDto resetFlowDto);
+
+    R getAdminSummary();
 }

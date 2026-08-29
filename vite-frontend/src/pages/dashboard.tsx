@@ -6,12 +6,16 @@ import toast from 'react-hot-toast';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 
-import { getUserPackageInfo } from "@/api";
+import { getUserPackageInfo, getAdminSummary } from "@/api";
+import GuideChecklist from "@/components/guide-checklist";
 
 interface UserInfo {
   flow: number;
   inFlow: number;
   outFlow: number;
+  dailyFlow?: number; // 每日流量限制(GB)，0=不限制
+  dailyInFlow?: number; // 今日已用入站流量(字节)
+  dailyOutFlow?: number; // 今日已用出站流量(字节)
   num: number;
   expTime?: string;
   flowResetTime?: number;
@@ -57,6 +61,45 @@ interface StatisticsFlow {
   time: string;
 }
 
+interface AdminTotals {
+  userCount: number;
+  activeUsers: number;
+  disabledUsers: number;
+  forwardCount: number;
+  tunnelCount: number;
+  nodeCount: number;
+  totalUsedFlow: number;
+}
+
+interface TunnelStat {
+  tunnelId: number;
+  tunnelName: string;
+  userCount: number;
+  forwardCount: number;
+  usedFlow: number;
+}
+
+interface TopUser {
+  userId: number;
+  userName: string;
+  status: number;
+  usedFlow: number;
+  forwardCount: number;
+  flowQuota?: number;
+}
+
+interface HourFlow {
+  time: string;
+  flow: number;
+}
+
+interface AdminSummary {
+  totals: AdminTotals;
+  tunnelStats: TunnelStat[];
+  topUsers: TopUser[];
+  recentFlows: HourFlow[];
+}
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo>({} as UserInfo);
@@ -64,6 +107,8 @@ export default function DashboardPage() {
   const [forwardList, setForwardList] = useState<Forward[]>([]);
   const [statisticsFlows, setStatisticsFlows] = useState<StatisticsFlow[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showGuideCard, setShowGuideCard] = useState(false);
+  const [adminSummary, setAdminSummary] = useState<AdminSummary | null>(null);
   
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [addressModalTitle, setAddressModalTitle] = useState('');
@@ -170,8 +215,17 @@ export default function DashboardPage() {
     // 检查用户是否是管理员
     const adminStatus = localStorage.getItem('admin');
     setIsAdmin(adminStatus === 'true');
+    // 首次登录展示引导卡片（按角色记录，看过即不再弹）
+    const guideKey = 'guide_checklist_seen_' + (adminStatus === 'true' ? 'admin' : 'user');
+    if (localStorage.getItem(guideKey) !== '1') {
+      setShowGuideCard(true);
+      localStorage.setItem(guideKey, '1');
+    }
     
     loadPackageData();
+    if (adminStatus === 'true') {
+      loadAdminSummary();
+    }
     localStorage.setItem('e', '/dashboard');
   }, []);
 
@@ -199,6 +253,18 @@ export default function DashboardPage() {
     }
   };
 
+  const loadAdminSummary = async () => {
+    try {
+      const res = await getAdminSummary();
+      if (res.code === 0) {
+        setAdminSummary(res.data);
+      } else {
+        console.warn('获取全站汇总失败:', res.msg);
+      }
+    } catch (error) {
+      console.error('获取全站汇总失败:', error);
+    }
+  };
   const formatFlow = (value: number, unit: string = 'bytes'): string => {
     // 99999 表示无限制
     if (value === 99999) {
@@ -591,6 +657,162 @@ export default function DashboardPage() {
       
         <div className="px-3 lg:px-6 py-2 lg:py-4">
 
+        {/* 首次登录引导卡片（独立开关，不影响其他区块） */}
+        {showGuideCard && (
+          <div className="mb-6 lg:mb-8">
+            <GuideChecklist isAdmin={isAdmin} onSkip={() => setShowGuideCard(false)} />
+          </div>
+        )}
+
+        {/* 管理员全站概览 */}
+        {isAdmin && adminSummary && adminSummary.totals && (
+          <div className="mb-6 lg:mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 6a3 3 0 013-3h10a1 1 0 01.8 1.6L14 8l2.8 3.4A1 1 0 0116 13H6a3 3 0 00-3 3V6z" clipRule="evenodd" />
+              </svg>
+              <h2 className="text-lg lg:text-xl font-semibold text-foreground">全站概览</h2>
+              <span className="px-2 py-1 bg-primary-100 dark:bg-primary-500/20 text-primary-700 dark:text-primary-300 rounded-full text-xs">管理员</span>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4">
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardBody className="p-3 lg:p-4">
+                  <p className="text-xs lg:text-sm text-default-600">用户总数</p>
+                  <p className="text-base lg:text-xl font-bold text-foreground">{adminSummary.totals.userCount}</p>
+                  <p className="text-xs text-default-500">启用 {adminSummary.totals.activeUsers} / 禁用 {adminSummary.totals.disabledUsers}</p>
+                </CardBody>
+              </Card>
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardBody className="p-3 lg:p-4">
+                  <p className="text-xs lg:text-sm text-default-600">总转发数</p>
+                  <p className="text-base lg:text-xl font-bold text-foreground">{adminSummary.totals.forwardCount}</p>
+                </CardBody>
+              </Card>
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardBody className="p-3 lg:p-4">
+                  <p className="text-xs lg:text-sm text-default-600">隧道 / 节点</p>
+                  <p className="text-base lg:text-xl font-bold text-foreground">{adminSummary.totals.tunnelCount} / {adminSummary.totals.nodeCount}</p>
+                </CardBody>
+              </Card>
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardBody className="p-3 lg:p-4">
+                  <p className="text-xs lg:text-sm text-default-600">全站累计流量</p>
+                  <p className="text-base lg:text-xl font-bold text-foreground">{formatFlow(adminSummary.totals.totalUsedFlow)}</p>
+                </CardBody>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardHeader className="pb-2">
+                  <h3 className="text-base font-semibold text-foreground">全站24小时流量趋势</h3>
+                </CardHeader>
+                <CardBody className="pt-0">
+                  {(adminSummary.recentFlows || []).length === 0 ? (
+                    <p className="text-default-500 text-center py-8">暂无全站流量数据</p>
+                  ) : (
+                    <div className="h-56 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={adminSummary.recentFlows}>
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={(v) => {
+                            if (v === 0) return '0';
+                            if (v < 1024) return v + 'B';
+                            if (v < 1024 * 1024) return (v / 1024).toFixed(1) + 'K';
+                            if (v < 1024 * 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + 'M';
+                            return (v / (1024 * 1024 * 1024)).toFixed(1) + 'G';
+                          }} />
+                          <Tooltip content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="bg-white dark:bg-default-100 border border-default-200 rounded-lg shadow-lg p-2">
+                                  <p className="font-medium text-foreground text-sm">{label}</p>
+                                  <p className="text-primary text-sm">{formatFlow(payload[0]?.value as number || 0)}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }} />
+                          <Line type="monotone" dataKey="flow" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+
+              <Card className="border border-gray-200 dark:border-default-200 shadow-md">
+                <CardHeader className="pb-2">
+                  <h3 className="text-base font-semibold text-foreground">用户用量 Top10</h3>
+                </CardHeader>
+                <CardBody className="pt-0">
+                  {(adminSummary.topUsers || []).length === 0 ? (
+                    <p className="text-default-500 text-center py-8">暂无用户数据</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                      {adminSummary.topUsers.map((u, idx) => (
+                        <div key={u.userId} className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-default-50 dark:bg-default-100/40">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-bold text-default-400 w-5">{idx + 1}</span>
+                            <span className="text-sm text-foreground truncate">{u.userName}</span>
+                            <span className={`text-xs px-1.5 rounded ${u.status === 1 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
+                              {u.status === 1 ? '正常' : '禁用'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <span className="text-xs text-default-500">{u.forwardCount} 转发</span>
+                            <span className="text-sm font-medium text-foreground">{formatFlow(u.usedFlow)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+            </div>
+
+            <Card className="mt-4 border border-gray-200 dark:border-default-200 shadow-md">
+              <CardHeader className="pb-2">
+                <h3 className="text-base font-semibold text-foreground">隧道用量排行</h3>
+              </CardHeader>
+              <CardBody className="pt-0">
+                {(adminSummary.tunnelStats || []).length === 0 ? (
+                  <p className="text-default-500 text-center py-8">暂无隧道数据</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-default-500 border-b border-divider">
+                          <th className="py-2 pr-4 font-medium">隧道</th>
+                          <th className="py-2 pr-4 font-medium">使用用户</th>
+                          <th className="py-2 pr-4 font-medium">转发数</th>
+                          <th className="py-2 font-medium text-right">累计流量</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminSummary.tunnelStats.map((t) => (
+                          <tr key={t.tunnelId} className="border-b border-divider last:border-0">
+                            <td className="py-2 pr-4 text-foreground truncate max-w-40">{t.tunnelName}</td>
+                            <td className="py-2 pr-4 text-default-600">{t.userCount}</td>
+                            <td className="py-2 pr-4 text-default-600">{t.forwardCount}</td>
+                            <td className="py-2 text-right font-medium text-foreground">{formatFlow(t.usedFlow)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+          </div>
+        )}
+
+                          {/* 我的概览统计卡片 */}
+         <div className="flex items-center gap-2 mb-3">
+           <h2 className="text-lg lg:text-xl font-semibold text-foreground">我的概览</h2>
+         </div>
                           {/* 响应式统计卡片 */}
          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-6 lg:mb-8">
            <Card className="border border-gray-200 dark:border-default-200 shadow-md hover:shadow-lg transition-shadow">
@@ -636,6 +858,22 @@ export default function DashboardPage() {
                        </div>
                      )}
                    </div>
+                   {userInfo.dailyFlow != null && userInfo.dailyFlow > 0 && (() => {
+                     const GB = 1024 * 1024 * 1024;
+                     const dailyUsed = (userInfo.dailyInFlow || 0) + (userInfo.dailyOutFlow || 0);
+                     const dailyPct = Math.min(100, Math.round((dailyUsed / (userInfo.dailyFlow * GB)) * 100));
+                     return (
+                       <div className="flex items-center justify-between gap-2 text-xs mt-1">
+                         <span className="text-default-500 shrink-0">今日流量</span>
+                         <div className="flex items-center gap-2 min-w-0">
+                           <div className="w-20 h-1.5 rounded-full bg-default-200 overflow-hidden shrink-0">
+                             <div className="h-full rounded-full bg-green-500" style={{ width: `${dailyPct}%` }} />
+                           </div>
+                           <span className="truncate">{formatFlow(dailyUsed)} / {userInfo.dailyFlow} GiB</span>
+                         </div>
+                       </div>
+                     );
+                   })()}
                  </div>
                </div>
              </CardBody>

@@ -64,6 +64,17 @@ public class UserController extends BaseController {
         return userService.getUserPackageInfo();
     }
 
+    /**
+     * 管理员全站汇总
+     * 仅管理员可访问，返回用户/转发/隧道/节点统计与用量排行
+     */
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/admin/summary")
+    public R getAdminSummary() {
+        return userService.getAdminSummary();
+    }
+
     @LogAnnotation
     @PostMapping("/updatePassword")
     public R updatePassword(@Validated @RequestBody ChangePasswordDto changePasswordDto) {

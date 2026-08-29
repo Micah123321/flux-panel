@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { runTour } from '@/utils/tour';
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
@@ -47,7 +48,6 @@ import {
   diagnoseForward,
   updateForwardOrder
 } from "@/api";
-import { JwtUtil } from "@/utils/jwt";
 
 interface Forward {
   id: number;
@@ -148,6 +148,17 @@ export default function ForwardPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // 首次访问转发页时展示气泡引导
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      runTour('forward_tour_v1', [
+        { element: '#forward-create-anchor', popover: { title: '创建转发', description: '点击这里新建转发规则：选择隧道、填写目标地址和入口端口。' } },
+        { element: '#forward-list-anchor', popover: { title: '转发列表', description: '所有转发规则都在这里管理，支持批量新增、排序与启停。' } },
+      ]);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, []);
+
   // 显示模式状态 - 从localStorage读取，默认为平铺显示
   const [viewMode, setViewMode] = useState<'grouped' | 'direct'>(() => {
     try {
@@ -223,12 +234,8 @@ export default function ForwardPage() {
 
       // 切换到直接显示模式时，初始化拖拽排序顺序
       if (newMode === 'direct') {
-        // 在平铺模式下，只对当前用户的转发进行排序
-        const currentUserId = JwtUtil.getUserIdFromToken();
-        let userForwards = forwards;
-        if (currentUserId !== null) {
-          userForwards = forwards.filter((f: Forward) => f.userId === currentUserId);
-        }
+        // 平铺模式展示全部用户的转发，排序也基于完整列表
+        const userForwards = forwards;
 
         // 检查数据库中是否有排序信息
         const hasDbOrdering = userForwards.some((f: Forward) => f.inx !== undefined && f.inx !== 0);
@@ -292,12 +299,8 @@ export default function ForwardPage() {
 
         // 初始化拖拽排序顺序
         if (viewMode === 'direct') {
-          // 在平铺模式下，只对当前用户的转发进行排序
-          const currentUserId = JwtUtil.getUserIdFromToken();
-          let userForwards = forwardsData;
-          if (currentUserId !== null) {
-            userForwards = forwardsData.filter((f: Forward) => f.userId === currentUserId);
-          }
+          // 平铺模式展示全部用户的转发，排序也基于完整列表
+          const userForwards = forwardsData;
 
           // 检查数据库中是否有排序信息
           const hasDbOrdering = userForwards.some((f: Forward) => f.inx !== undefined && f.inx !== 0);
@@ -1301,14 +1304,8 @@ export default function ForwardPage() {
       return [];
     }
 
-    // 在平铺模式下，只显示当前用户的转发
-    let filteredForwards = forwards;
-    if (viewMode === 'direct') {
-      const currentUserId = JwtUtil.getUserIdFromToken();
-      if (currentUserId !== null) {
-        filteredForwards = forwards.filter(forward => forward.userId === currentUserId);
-      }
-    }
+    // 平铺模式展示全部用户的转发（后端已按角色返回对应范围）
+    const filteredForwards = forwards;
 
     // 确保过滤后的转发列表有效
     if (!filteredForwards || filteredForwards.length === 0) {
@@ -1566,7 +1563,7 @@ export default function ForwardPage() {
 
   return (
 
-      <div className="px-3 lg:px-6 py-8">
+      <div id="forward-list-anchor" className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex-1">
@@ -1616,6 +1613,7 @@ export default function ForwardPage() {
             </Button>
 
             <Button
+              id="forward-create-anchor"
               size="sm"
               variant="flat"
               color="primary"

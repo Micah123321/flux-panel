@@ -17,7 +17,8 @@ import {
   updateTunnel, 
   deleteTunnel,
   getNodeList,
-  diagnoseTunnel
+  diagnoseTunnel,
+  getAdminSummary
 } from "@/api";
 
 interface Tunnel {
@@ -42,6 +43,14 @@ interface Node {
   id: number;
   name: string;
   status: number; // 1: 在线, 0: 离线
+}
+
+interface TunnelStat {
+  tunnelId: number;
+  tunnelName: string;
+  userCount: number;
+  forwardCount: number;
+  usedFlow: number;
 }
 
 interface TunnelForm {
@@ -80,6 +89,8 @@ export default function TunnelPage() {
   const [loading, setLoading] = useState(true);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [tunnelStats, setTunnelStats] = useState<TunnelStat[]>([]);
   
   // 模态框状态
   const [modalOpen, setModalOpen] = useState(false);
@@ -112,6 +123,7 @@ export default function TunnelPage() {
   const [errors, setErrors] = useState<{[key: string]: string}>({});
 
   useEffect(() => {
+    setIsAdmin(localStorage.getItem('admin') === 'true');
     loadData();
   }, []);
 
@@ -134,6 +146,18 @@ export default function TunnelPage() {
         setNodes(nodesRes.data || []);
       } else {
         console.warn('获取节点列表失败:', nodesRes.msg);
+      }
+
+      // 管理员加载隧道占用统计
+      if (localStorage.getItem('admin') === 'true') {
+        try {
+          const summaryRes = await getAdminSummary();
+          if (summaryRes.code === 0 && summaryRes.data) {
+            setTunnelStats(summaryRes.data.tunnelStats || []);
+          }
+        } catch (summaryErr) {
+          console.warn('获取隧道占用统计失败:', summaryErr);
+        }
       }
     } catch (error) {
       console.error('加载数据失败:', error);
@@ -410,7 +434,19 @@ export default function TunnelPage() {
     return { text: '😵 很差', color: 'danger' };
   };
 
-  if (loading) {
+  const getTunnelStat = (tunnelId: number): TunnelStat | undefined => {
+    return tunnelStats.find(s => s.tunnelId === tunnelId);
+  };
+
+  const formatFlowShort = (value: number): string => {
+    if (value === 0) return '0 B';
+    if (value < 1024) return value + ' B';
+    if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+    if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+    return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  };
+
+    if (loading) {
     return (
       
         <div className="flex items-center justify-center h-64">
@@ -473,6 +509,14 @@ export default function TunnelPage() {
                           >
                             {statusDisplay.text}
                           </Chip>
+                          {isAdmin && (() => {
+                            const stat = getTunnelStat(tunnel.id);
+                            return stat ? (
+                              <Chip color="secondary" variant="flat" size="sm" className="text-xs">
+                                {stat.userCount} 用户 · {stat.forwardCount} 转发 · {formatFlowShort(stat.usedFlow)}
+                              </Chip>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
                     </div>

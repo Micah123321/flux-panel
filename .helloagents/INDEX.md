@@ -8,6 +8,7 @@
 ## 模块记录
 
 - [模块索引](modules/_index.md)
+- [管理员数据视图](modules/admin-dashboard.md)
 - [维护与发布通道](modules/release-maintenance.md)
 
 ## 方案包
