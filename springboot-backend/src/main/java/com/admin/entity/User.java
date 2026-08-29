@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
+
 /**
  * <p>
  *
@@ -58,5 +60,20 @@ public class User extends BaseEntity {
 
     private Long flowResetTime;
 
+    private Long packagePlanId;
+
+    private Long userGroupId;
+
+    private Integer speedMbps;
+
+    private Integer ipLimit;
+
+    private Integer connectionLimit;
+
+    private String inviteCode;
+
+    private Long inviterUserId;
+
+    private BigDecimal inviteBalance;
 
 }

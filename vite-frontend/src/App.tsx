@@ -5,12 +5,16 @@ import IndexPage from "@/pages/index";
 import ChangePasswordPage from "@/pages/change-password";
 import DashboardPage from "@/pages/dashboard";
 import ForwardPage from "@/pages/forward";
+import AggregateForwardPage from "@/pages/aggregate-forward";
 import TunnelPage from "@/pages/tunnel";
 import NodePage from "@/pages/node";
 import UserPage from "@/pages/user";
 import ProfilePage from "@/pages/profile";
 import LimitPage from "@/pages/limit";
 import ConfigPage from "@/pages/config";
+import CommercePage from "@/pages/commerce";
+import CommerceAdminPage from "@/pages/commerce-admin";
+import RegisterPage from "@/pages/register";
 import { SettingsPage } from "@/pages/settings";
 
 import AdminLayout from "@/layouts/admin";
@@ -31,7 +35,7 @@ const useH5Mode = () => {
     // 检测URL参数是否包含h5模式
     const urlParams = new URLSearchParams(window.location.search);
     const isH5Param = urlParams.get('h5') === 'true';
-    
+
     return isMobile || isMobileBrowser || isH5Param;
   };
 
@@ -46,12 +50,12 @@ const useH5Mode = () => {
       // 检测URL参数是否包含h5模式
       const urlParams = new URLSearchParams(window.location.search);
       const isH5Param = urlParams.get('h5') === 'true';
-      
+
       setIsH5(isMobile || isMobileBrowser || isH5Param);
     };
 
     window.addEventListener('resize', checkH5Mode);
-    
+
     return () => window.removeEventListener('resize', checkH5Mode);
   }, []);
 
@@ -63,7 +67,7 @@ const ProtectedRoute = ({ children, useSimpleLayout = false, skipLayout = false 
   const authenticated = isLoggedIn();
   const isH5 = useH5Mode();
   const navigate = useNavigate();
-  
+
   useEffect(() => {
     if (!authenticated) {
       // 使用 React Router 导航，避免无限跳转
@@ -93,7 +97,7 @@ const ProtectedRoute = ({ children, useSimpleLayout = false, skipLayout = false 
   } else {
     Layout = AdminLayout;
   }
-  
+
   return <Layout>{children}</Layout>;
 };
 
@@ -102,14 +106,14 @@ const ProtectedRoute = ({ children, useSimpleLayout = false, skipLayout = false 
 const LoginRoute = () => {
   const authenticated = isLoggedIn();
   const navigate = useNavigate();
-  
+
   useEffect(() => {
     if (authenticated) {
       // 使用 React Router 导航，避免无限跳转
       navigate('/dashboard', { replace: true });
     }
   }, [authenticated, navigate]);
-  
+
   if (authenticated) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-black">
@@ -117,7 +121,7 @@ const LoginRoute = () => {
       </div>
     );
   }
-  
+
   return <IndexPage />;
 };
 
@@ -125,7 +129,7 @@ function App() {
   // 立即设置页面标题（使用已从缓存读取的配置）
   useEffect(() => {
     document.title = siteConfig.name;
-    
+
     // 异步检查是否有配置更新
     const checkTitleUpdate = async () => {
       try {
@@ -149,80 +153,105 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<LoginRoute />} />
-      <Route 
-        path="/change-password" 
+      <Route path="/register" element={<RegisterPage />} />
+      <Route
+        path="/change-password"
         element={
           <ProtectedRoute skipLayout={true}>
             <ChangePasswordPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/dashboard" 
+      <Route
+        path="/dashboard"
         element={
           <ProtectedRoute>
             <DashboardPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/forward" 
+      <Route
+        path="/forward"
         element={
           <ProtectedRoute>
             <ForwardPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/tunnel" 
+      <Route
+        path="/aggregate-forward"
+        element={
+          <ProtectedRoute>
+            <AggregateForwardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tunnel"
         element={
           <ProtectedRoute>
             <TunnelPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/node" 
+      <Route
+        path="/node"
         element={
           <ProtectedRoute>
             <NodePage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/user" 
+      <Route
+        path="/user"
         element={
           <ProtectedRoute useSimpleLayout={true}>
             <UserPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/profile" 
+      <Route
+        path="/profile"
         element={
           <ProtectedRoute>
             <ProfilePage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/limit" 
+      <Route
+        path="/shop"
+        element={
+          <ProtectedRoute>
+            <CommercePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/limit"
         element={
           <ProtectedRoute useSimpleLayout={true}>
             <LimitPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/config" 
+      <Route
+        path="/config"
         element={
           <ProtectedRoute useSimpleLayout={true}>
             <ConfigPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/settings" 
+      <Route
+        path="/commerce-admin"
+        element={
+          <ProtectedRoute useSimpleLayout={true}>
+            <CommerceAdminPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
         element={<SettingsPage />}
       />
     </Routes>

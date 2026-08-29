@@ -72,6 +72,49 @@ CREATE TABLE `node` (
 -- --------------------------------------------------------
 
 --
+-- 表的结构 `aggregate_node_group`
+--
+
+CREATE TABLE `aggregate_node_group` (
+  `id` int(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `node_ids` text NOT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) NOT NULL,
+  `status` int(10) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `aggregate_forward`
+--
+
+CREATE TABLE `aggregate_forward` (
+  `id` int(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `entry_group_id` int(10) NOT NULL,
+  `exit_group_id` int(10) NOT NULL,
+  `entry_addresses` text NOT NULL,
+  `entry_port_start` int(10) NOT NULL,
+  `entry_port_end` int(10) NOT NULL,
+  `target_port_start` int(10) NOT NULL,
+  `target_port_end` int(10) NOT NULL,
+  `mode` varchar(30) NOT NULL DEFAULT 'load_balance',
+  `traffic_ratio` decimal(10,1) NOT NULL DEFAULT '1.0',
+  `in_flow` bigint(20) NOT NULL DEFAULT '0',
+  `out_flow` bigint(20) NOT NULL DEFAULT '0',
+  `interface_name` varchar(200) DEFAULT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) NOT NULL,
+  `status` int(10) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
 -- 表的结构 `speed_limit`
 --
 
@@ -143,6 +186,14 @@ CREATE TABLE `user` (
   `out_flow` bigint(20) NOT NULL DEFAULT '0',
   `flow_reset_time` bigint(20) NOT NULL,
   `num` int(10) NOT NULL,
+  `package_plan_id` int(10) DEFAULT NULL,
+  `user_group_id` int(10) DEFAULT NULL,
+  `speed_mbps` int(10) NOT NULL DEFAULT '0',
+  `ip_limit` int(10) NOT NULL DEFAULT '0',
+  `connection_limit` int(10) NOT NULL DEFAULT '0',
+  `invite_code` varchar(32) DEFAULT NULL,
+  `inviter_user_id` int(10) DEFAULT NULL,
+  `invite_balance` decimal(10,2) NOT NULL DEFAULT '0.00',
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) NOT NULL
@@ -152,8 +203,8 @@ CREATE TABLE `user` (
 -- 转存表中的数据 `user`
 --
 
-INSERT INTO `user` (`id`, `user`, `pwd`, `role_id`, `exp_time`, `flow`, `in_flow`, `out_flow`, `flow_reset_time`, `num`, `created_time`, `updated_time`, `status`) VALUES
-(1, 'admin_user', '3c85cdebade1c51cf64ca9f3c09d182d', 0, 2727251700000, 99999, 0, 0, 1, 99999, 1748914865000, 1754011744252, 1);
+INSERT INTO `user` (`id`, `user`, `pwd`, `role_id`, `exp_time`, `flow`, `in_flow`, `out_flow`, `flow_reset_time`, `num`, `package_plan_id`, `user_group_id`, `speed_mbps`, `ip_limit`, `connection_limit`, `invite_code`, `inviter_user_id`, `invite_balance`, `created_time`, `updated_time`, `status`) VALUES
+(1, 'admin_user', '3c85cdebade1c51cf64ca9f3c09d182d', 0, 2727251700000, 99999, 0, 0, 1, 99999, NULL, NULL, 0, 0, 0, 'IVADMIN', NULL, 0.00, 1748914865000, 1754011744252, 1);
 
 -- --------------------------------------------------------
 
@@ -193,8 +244,159 @@ CREATE TABLE `vite_config` (
 --
 
 INSERT INTO `vite_config` (`id`, `name`, `value`, `time`) VALUES
-(1, 'app_name', 'flux', 1755147963000);
+(1, 'app_name', 'flux', 1755147963000),
+(2, 'invite_ratio', '0', 1755147963000),
+(3, 'invite_renewal_ratio', '0', 1755147963000);
 
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `package_plan`
+--
+
+CREATE TABLE `package_plan` (
+  `id` int(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `hidden` int(10) NOT NULL DEFAULT '0',
+  `price` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `type` int(10) NOT NULL DEFAULT '1',
+  `duration_multiplier` int(10) NOT NULL DEFAULT '1',
+  `user_group_id` int(10) DEFAULT NULL,
+  `flow` bigint(20) NOT NULL DEFAULT '0',
+  `max_rules` int(10) NOT NULL DEFAULT '0',
+  `speed_mbps` int(10) NOT NULL DEFAULT '0',
+  `ip_limit` int(10) NOT NULL DEFAULT '0',
+  `connection_limit` int(10) NOT NULL DEFAULT '0',
+  `description` longtext,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `device_group`
+--
+
+CREATE TABLE `device_group` (
+  `id` int(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `tunnel_ids` longtext,
+  `description` longtext,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `user_group`
+--
+
+CREATE TABLE `user_group` (
+  `id` int(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `description` longtext,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `user_group_device_group`
+--
+
+CREATE TABLE `user_group_device_group` (
+  `id` int(10) NOT NULL,
+  `user_group_id` int(10) NOT NULL,
+  `device_group_id` int(10) NOT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `order_record`
+--
+
+CREATE TABLE `order_record` (
+  `id` int(10) NOT NULL,
+  `order_no` varchar(64) NOT NULL,
+  `user_id` int(10) NOT NULL,
+  `package_plan_id` int(10) NOT NULL,
+  `package_name` varchar(100) NOT NULL,
+  `original_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `discount_ratio` int(10) NOT NULL DEFAULT '100',
+  `payable_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `status` int(10) NOT NULL DEFAULT '0',
+  `redeem_code_id` int(10) DEFAULT NULL,
+  `inviter_user_id` int(10) DEFAULT NULL,
+  `reward_ratio` int(10) NOT NULL DEFAULT '0',
+  `reward_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `completed_time` bigint(20) DEFAULT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `redeem_code`
+--
+
+CREATE TABLE `redeem_code` (
+  `id` int(10) NOT NULL,
+  `package_plan_id` int(10) NOT NULL,
+  `package_name` varchar(100) NOT NULL,
+  `discount_ratio` int(10) NOT NULL DEFAULT '100',
+  `total_times` int(10) NOT NULL DEFAULT '1',
+  `used_times` int(10) NOT NULL DEFAULT '0',
+  `code` varchar(64) NOT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `invite_record`
+--
+
+CREATE TABLE `invite_record` (
+  `id` int(10) NOT NULL,
+  `inviter_user_id` int(10) NOT NULL,
+  `invitee_user_id` int(10) NOT NULL,
+  `invite_code` varchar(32) NOT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `invite_reward_record`
+--
+
+CREATE TABLE `invite_reward_record` (
+  `id` int(10) NOT NULL,
+  `order_id` int(10) NOT NULL,
+  `inviter_user_id` int(10) NOT NULL,
+  `invitee_user_id` int(10) NOT NULL,
+  `reward_amount` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `ratio` int(10) NOT NULL DEFAULT '0',
+  `type` int(10) NOT NULL DEFAULT '1',
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) NOT NULL DEFAULT '1'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 --
 -- 转储表的索引
 --
@@ -203,6 +405,18 @@ INSERT INTO `vite_config` (`id`, `name`, `value`, `time`) VALUES
 -- 表的索引 `forward`
 --
 ALTER TABLE `forward`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `aggregate_node_group`
+--
+ALTER TABLE `aggregate_node_group`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `aggregate_forward`
+--
+ALTER TABLE `aggregate_forward`
   ADD PRIMARY KEY (`id`);
 
 --
@@ -233,7 +447,8 @@ ALTER TABLE `tunnel`
 -- 表的索引 `user`
 --
 ALTER TABLE `user`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `invite_code` (`invite_code`);
 
 --
 -- 表的索引 `user_tunnel`
@@ -249,6 +464,58 @@ ALTER TABLE `vite_config`
   ADD UNIQUE KEY `name` (`name`);
 
 --
+-- 表的索引 `package_plan`
+--
+ALTER TABLE `package_plan`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `device_group`
+--
+ALTER TABLE `device_group`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `user_group`
+--
+ALTER TABLE `user_group`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `user_group_device_group`
+--
+ALTER TABLE `user_group_device_group`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `user_device_group` (`user_group_id`,`device_group_id`);
+
+--
+-- 表的索引 `order_record`
+--
+ALTER TABLE `order_record`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `order_no` (`order_no`);
+
+--
+-- 表的索引 `redeem_code`
+--
+ALTER TABLE `redeem_code`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `code` (`code`);
+
+--
+-- 表的索引 `invite_record`
+--
+ALTER TABLE `invite_record`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `invitee_user_id` (`invitee_user_id`);
+
+--
+-- 表的索引 `invite_reward_record`
+--
+ALTER TABLE `invite_reward_record`
+  ADD PRIMARY KEY (`id`);
+
+--
 -- 在导出的表使用AUTO_INCREMENT
 --
 
@@ -256,6 +523,18 @@ ALTER TABLE `vite_config`
 -- 使用表AUTO_INCREMENT `forward`
 --
 ALTER TABLE `forward`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `aggregate_node_group`
+--
+ALTER TABLE `aggregate_node_group`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `aggregate_forward`
+--
+ALTER TABLE `aggregate_forward`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 --
@@ -298,6 +577,54 @@ ALTER TABLE `user_tunnel`
 -- 使用表AUTO_INCREMENT `vite_config`
 --
 ALTER TABLE `vite_config`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `package_plan`
+--
+ALTER TABLE `package_plan`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `device_group`
+--
+ALTER TABLE `device_group`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `user_group`
+--
+ALTER TABLE `user_group`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `user_group_device_group`
+--
+ALTER TABLE `user_group_device_group`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `order_record`
+--
+ALTER TABLE `order_record`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `redeem_code`
+--
+ALTER TABLE `redeem_code`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `invite_record`
+--
+ALTER TABLE `invite_record`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `invite_reward_record`
+--
+ALTER TABLE `invite_reward_record`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 COMMIT;
 

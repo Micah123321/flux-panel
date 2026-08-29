@@ -32,4 +32,14 @@ public class UserUpdateDto {
     private Long flowResetTime;
 
     private Integer status;
-} 
+
+    private Long packagePlanId;
+
+    private Long userGroupId;
+
+    private Integer speedMbps;
+
+    private Integer ipLimit;
+
+    private Integer connectionLimit;
+}

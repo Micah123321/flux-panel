@@ -68,6 +68,18 @@ export const diagnoseForward = (forwardId: number) => Network.post("/forward/dia
 // 转发排序操作
 export const updateForwardOrder = (data: { forwards: Array<{ id: number; inx: number }> }) => Network.post("/forward/update-order", data);
 
+// 聚合节点组与聚合转发操作 - 全部使用POST请求
+export const createAggregateNodeGroup = (data: any) => Network.post("/aggregate-node-group/create", data);
+export const getAggregateNodeGroups = () => Network.post("/aggregate-node-group/list");
+export const updateAggregateNodeGroup = (data: any) => Network.post("/aggregate-node-group/update", data);
+export const deleteAggregateNodeGroup = (id: number) => Network.post("/aggregate-node-group/delete", { id });
+export const createAggregateForward = (data: any) => Network.post("/aggregate-forward/create", data);
+export const getAggregateForwards = () => Network.post("/aggregate-forward/list");
+export const updateAggregateForward = (data: any) => Network.post("/aggregate-forward/update", data);
+export const deleteAggregateForward = (id: number) => Network.post("/aggregate-forward/delete", { id });
+export const pauseAggregateForward = (id: number) => Network.post("/aggregate-forward/pause", { id });
+export const resumeAggregateForward = (id: number) => Network.post("/aggregate-forward/resume", { id });
+
 // 限速规则CRUD操作 - 全部使用POST请求
 export const createSpeedLimit = (data: any) => Network.post("/speed-limit/create", data);
 export const getSpeedLimitList = () => Network.post("/speed-limit/list");
@@ -86,6 +98,38 @@ export const getConfigByName = (name: string) => Network.post("/config/get", { n
 export const updateConfigs = (configMap: Record<string, string>) => Network.post("/config/update", configMap);
 export const updateConfig = (name: string, value: string) => Network.post("/config/update-single", { name, value });
 
+// 商业化功能接口
+export const registerUser = (data: any) => Network.post("/commerce/register", data);
+export const getPackagePlans = () => Network.post("/commerce/plans");
+export const createOrder = (data: any) => Network.post("/commerce/order/create", data);
+export const completeOrder = (id: number) => Network.post("/commerce/order/complete", { id });
+export const getMyOrders = () => Network.post("/commerce/orders");
+export const redeemCode = (code: string) => Network.post("/commerce/redeem", { code });
+export const getInviteInfo = () => Network.post("/commerce/invite/info");
+export const getMyInviteRecords = () => Network.post("/commerce/invite/records");
+
+export const adminGetPackagePlans = () => Network.post("/admin/commerce/plan/list");
+export const adminCreatePackagePlan = (data: any) => Network.post("/admin/commerce/plan/create", data);
+export const adminUpdatePackagePlan = (data: any) => Network.post("/admin/commerce/plan/update", data);
+export const adminDeletePackagePlan = (id: number) => Network.post("/admin/commerce/plan/delete", { id });
+export const adminGetDeviceGroups = () => Network.post("/admin/commerce/device-group/list");
+export const adminCreateDeviceGroup = (data: any) => Network.post("/admin/commerce/device-group/create", data);
+export const adminUpdateDeviceGroup = (data: any) => Network.post("/admin/commerce/device-group/update", data);
+export const adminDeleteDeviceGroup = (id: number) => Network.post("/admin/commerce/device-group/delete", { id });
+export const adminBindDeviceGroupTunnels = (data: any) => Network.post("/admin/commerce/device-group/bind-tunnels", data);
+export const adminGetUserGroups = () => Network.post("/admin/commerce/user-group/list");
+export const adminCreateUserGroup = (data: any) => Network.post("/admin/commerce/user-group/create", data);
+export const adminUpdateUserGroup = (data: any) => Network.post("/admin/commerce/user-group/update", data);
+export const adminDeleteUserGroup = (id: number) => Network.post("/admin/commerce/user-group/delete", { id });
+export const adminBindUserGroupDeviceGroups = (data: any) => Network.post("/admin/commerce/user-group/bind-device-groups", data);
+export const adminGetRedeemCodes = () => Network.post("/admin/commerce/redeem-code/list");
+export const adminBatchCreateRedeemCodes = (data: any) => Network.post("/admin/commerce/redeem-code/batch-create", data);
+export const adminDeleteRedeemCode = (id: number) => Network.post("/admin/commerce/redeem-code/delete", { id });
+export const adminGetOrders = () => Network.post("/admin/commerce/order/list");
+export const adminCompleteOrder = (id: number) => Network.post("/admin/commerce/order/complete", { id });
+export const adminGetInviteConfig = () => Network.post("/admin/commerce/invite/config");
+export const adminUpdateInviteConfig = (data: any) => Network.post("/admin/commerce/invite/config/update", data);
+export const adminGetInviteRecords = () => Network.post("/admin/commerce/invite/records");
 
 // 验证码相关接口
 export const checkCaptcha = () => Network.post("/captcha/check");

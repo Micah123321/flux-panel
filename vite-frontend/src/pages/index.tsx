@@ -291,6 +291,13 @@ export default function IndexPage() {
                 >
                   {loading ? (showCaptcha ? "验证中..." : "登录中...") : "登录"}
                 </Button>
+
+                <Button
+                  variant="light"
+                  onClick={() => navigate("/register")}
+                >
+                  注册账号
+                </Button>
               </div>
             </CardBody>
           </Card>

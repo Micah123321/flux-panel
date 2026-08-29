@@ -1068,6 +1068,322 @@ UPDATE \`statistics_flow\`
 SET \`created_time\` = UNIX_TIMESTAMP() * 1000
 WHERE \`created_time\` = 0 OR \`created_time\` IS NULL;
 
+-- 商业化功能：用户扩展字段与邀请唯一索引
+-- user 表：添加 package_plan_id 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'package_plan_id'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`package_plan_id\` INT(10) DEFAULT NULL COMMENT "当前套餐ID";',
+    'SELECT "Column \`package_plan_id\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 user_group_id 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'user_group_id'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`user_group_id\` INT(10) DEFAULT NULL COMMENT "当前用户组ID";',
+    'SELECT "Column \`user_group_id\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 speed_mbps 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'speed_mbps'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`speed_mbps\` INT(10) NOT NULL DEFAULT 0 COMMENT "用户限速Mbps";',
+    'SELECT "Column \`speed_mbps\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 ip_limit 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'ip_limit'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`ip_limit\` INT(10) NOT NULL DEFAULT 0 COMMENT "用户IP限制";',
+    'SELECT "Column \`ip_limit\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 connection_limit 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'connection_limit'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`connection_limit\` INT(10) NOT NULL DEFAULT 0 COMMENT "用户连接数限制";',
+    'SELECT "Column \`connection_limit\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 invite_code 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'invite_code'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`invite_code\` VARCHAR(32) DEFAULT NULL COMMENT "用户邀请码";',
+    'SELECT "Column \`invite_code\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 inviter_user_id 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'inviter_user_id'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`inviter_user_id\` INT(10) DEFAULT NULL COMMENT "邀请人用户ID";',
+    'SELECT "Column \`inviter_user_id\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user 表：添加 invite_balance 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'invite_balance'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`invite_balance\` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT "邀请返现余额";',
+    'SELECT "Column \`invite_balance\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.STATISTICS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND index_name = 'invite_code'
+    ),
+    'ALTER TABLE \`user\` ADD UNIQUE KEY \`invite_code\` (\`invite_code\`);',
+    'SELECT "Index \`invite_code\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 聚合转发功能：节点组和转发表
+CREATE TABLE IF NOT EXISTS \`aggregate_node_group\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`name\` varchar(100) NOT NULL,
+  \`node_ids\` text NOT NULL,
+  \`remark\` varchar(500) DEFAULT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) NOT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`aggregate_forward\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`name\` varchar(100) NOT NULL,
+  \`entry_group_id\` int(10) NOT NULL,
+  \`exit_group_id\` int(10) NOT NULL,
+  \`entry_addresses\` text NOT NULL,
+  \`entry_port_start\` int(10) NOT NULL,
+  \`entry_port_end\` int(10) NOT NULL,
+  \`target_port_start\` int(10) NOT NULL,
+  \`target_port_end\` int(10) NOT NULL,
+  \`mode\` varchar(30) NOT NULL DEFAULT 'load_balance',
+  \`traffic_ratio\` decimal(10,1) NOT NULL DEFAULT 1.0,
+  \`in_flow\` bigint(20) NOT NULL DEFAULT 0,
+  \`out_flow\` bigint(20) NOT NULL DEFAULT 0,
+  \`interface_name\` varchar(200) DEFAULT NULL,
+  \`remark\` varchar(500) DEFAULT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) NOT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+-- 商业化功能：套餐、设备组、用户组、订单、兑换码和邀请返现表
+CREATE TABLE IF NOT EXISTS \`package_plan\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`name\` varchar(100) NOT NULL,
+  \`hidden\` int(10) NOT NULL DEFAULT 0,
+  \`price\` decimal(10,2) NOT NULL DEFAULT 0.00,
+  \`type\` int(10) NOT NULL DEFAULT 1,
+  \`duration_multiplier\` int(10) NOT NULL DEFAULT 1,
+  \`user_group_id\` int(10) DEFAULT NULL,
+  \`flow\` bigint(20) NOT NULL DEFAULT 0,
+  \`max_rules\` int(10) NOT NULL DEFAULT 0,
+  \`speed_mbps\` int(10) NOT NULL DEFAULT 0,
+  \`ip_limit\` int(10) NOT NULL DEFAULT 0,
+  \`connection_limit\` int(10) NOT NULL DEFAULT 0,
+  \`description\` longtext,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`device_group\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`name\` varchar(100) NOT NULL,
+  \`tunnel_ids\` longtext,
+  \`description\` longtext,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`user_group\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`name\` varchar(100) NOT NULL,
+  \`description\` longtext,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`user_group_device_group\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`user_group_id\` int(10) NOT NULL,
+  \`device_group_id\` int(10) NOT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`user_device_group\` (\`user_group_id\`,\`device_group_id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`order_record\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`order_no\` varchar(64) NOT NULL,
+  \`user_id\` int(10) NOT NULL,
+  \`package_plan_id\` int(10) NOT NULL,
+  \`package_name\` varchar(100) NOT NULL,
+  \`original_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
+  \`discount_ratio\` int(10) NOT NULL DEFAULT 100,
+  \`payable_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
+  \`status\` int(10) NOT NULL DEFAULT 0,
+  \`redeem_code_id\` int(10) DEFAULT NULL,
+  \`inviter_user_id\` int(10) DEFAULT NULL,
+  \`reward_ratio\` int(10) NOT NULL DEFAULT 0,
+  \`reward_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
+  \`completed_time\` bigint(20) DEFAULT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`order_no\` (\`order_no\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`redeem_code\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`package_plan_id\` int(10) NOT NULL,
+  \`package_name\` varchar(100) NOT NULL,
+  \`discount_ratio\` int(10) NOT NULL DEFAULT 100,
+  \`total_times\` int(10) NOT NULL DEFAULT 1,
+  \`used_times\` int(10) NOT NULL DEFAULT 0,
+  \`code\` varchar(64) NOT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`code\` (\`code\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`invite_record\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`inviter_user_id\` int(10) NOT NULL,
+  \`invitee_user_id\` int(10) NOT NULL,
+  \`invite_code\` varchar(32) NOT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`invitee_user_id\` (\`invitee_user_id\`)
+);
+
+CREATE TABLE IF NOT EXISTS \`invite_reward_record\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`order_id\` int(10) NOT NULL,
+  \`inviter_user_id\` int(10) NOT NULL,
+  \`invitee_user_id\` int(10) NOT NULL,
+  \`reward_amount\` decimal(10,2) NOT NULL DEFAULT 0.00,
+  \`ratio\` int(10) NOT NULL DEFAULT 0,
+  \`type\` int(10) NOT NULL DEFAULT 1,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 1,
+  PRIMARY KEY (\`id\`)
+);
+
+INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`) VALUES
+  ('invite_ratio', '0', UNIX_TIMESTAMP() * 1000),
+  ('invite_renewal_ratio', '0', UNIX_TIMESTAMP() * 1000)
+ON DUPLICATE KEY UPDATE \`time\` = \`time\`;
+
 EOF
 
   # 检查数据库容器

@@ -54,6 +54,20 @@ export default function ProfilePage() {
     setIsAdmin(adminFlag);
   }, []);
 
+  const userMenuItems: MenuItem[] = [
+    {
+      path: '/shop',
+      label: '套餐中心',
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M4 3a2 2 0 00-2 2v2h16V5a2 2 0 00-2-2H4zM18 9H2v6a2 2 0 002 2h12a2 2 0 002-2V9zm-8 5a1 1 0 100-2 1 1 0 000 2z" />
+        </svg>
+      ),
+      color: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+      description: '购买套餐与邀请返现'
+    }
+  ];
+
   // 管理员菜单项
   const adminMenuItems: MenuItem[] = [
     {
@@ -88,6 +102,17 @@ export default function ProfilePage() {
       ),
       color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400',
       description: '配置网站设置'
+    },
+    {
+      path: '/commerce-admin',
+      label: '商业管理',
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M4 3a2 2 0 00-2 2v2h16V5a2 2 0 00-2-2H4zM18 9H2v6a2 2 0 002 2h12a2 2 0 002-2V9zm-8 5a1 1 0 100-2 1 1 0 000 2z" />
+        </svg>
+      ),
+      color: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+      description: '套餐订单兑换码邀请'
     }
   ];
 
@@ -194,6 +219,19 @@ export default function ProfilePage() {
         <Card className="border border-gray-200 dark:border-default-200 shadow-md hover:shadow-lg transition-shadow">
           <CardBody className="p-4">
             <div className="grid grid-cols-3 gap-3">
+              {userMenuItems.map((item) => (
+                <button
+                  key={item.path}
+                  onClick={() => navigate(item.path)}
+                  className="flex flex-col items-center p-3 rounded-2xl bg-gray-50 dark:bg-default-100 hover:bg-gray-100 dark:hover:bg-default-200 transition-colors duration-200"
+                >
+                  <div className={`w-10 h-10 ${item.color} rounded-full flex items-center justify-center mb-2`}>
+                    {item.icon}
+                  </div>
+                  <span className="text-xs text-foreground text-center">{item.label}</span>
+                </button>
+              ))}
+
               {/* 管理员功能 */}
               {isAdmin && adminMenuItems.map((item) => (
                 <button

@@ -18,6 +18,14 @@ export interface User {
   createdTime?: number; // 创建时间戳
   inFlow?: number; // 下载流量(字节)
   outFlow?: number; // 上传流量(字节)
+  packagePlanId?: number | null;
+  userGroupId?: number | null;
+  speedMbps?: number;
+  ipLimit?: number;
+  connectionLimit?: number;
+  inviteCode?: string;
+  inviterUserId?: number | null;
+  inviteBalance?: number;
 }
 
 export interface UserForm {
@@ -30,6 +38,11 @@ export interface UserForm {
   num: number;
   expTime: Date | null;
   flowResetTime: number;
+  packagePlanId?: number | null;
+  userGroupId?: number | null;
+  speedMbps?: number;
+  ipLimit?: number;
+  connectionLimit?: number;
 }
 
 export interface UserTunnel {
@@ -75,6 +88,115 @@ export interface SpeedLimit {
   tunnelId: number;
   uploadSpeed: number;
   downloadSpeed: number;
+}
+
+export interface PackagePlan {
+  id: number;
+  name: string;
+  hidden: number;
+  price: number;
+  type: number;
+  durationMultiplier: number;
+  userGroupId?: number | null;
+  flow: number;
+  maxRules: number;
+  speedMbps: number;
+  ipLimit: number;
+  connectionLimit: number;
+  description?: string;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface DeviceGroup {
+  id: number;
+  name: string;
+  tunnelIds?: string;
+  tunnelIdList?: number[];
+  tunnelNames?: string;
+  description?: string;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface UserGroup {
+  id: number;
+  name: string;
+  description?: string;
+  deviceGroupIds?: number[];
+  deviceGroupNames?: string;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface RedeemCode {
+  id: number;
+  packagePlanId: number;
+  packageName: string;
+  discountRatio: number;
+  totalTimes: number;
+  usedTimes: number;
+  code: string;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface OrderRecord {
+  id: number;
+  orderNo: string;
+  userId: number;
+  packagePlanId: number;
+  packageName: string;
+  originalAmount: number;
+  discountRatio: number;
+  payableAmount: number;
+  status: number;
+  redeemCodeId?: number | null;
+  inviterUserId?: number | null;
+  rewardRatio: number;
+  rewardAmount: number;
+  completedTime?: number | null;
+  createdTime?: number;
+  updatedTime?: number;
+}
+
+export interface InviteInfo {
+  inviteCode: string;
+  inviteBalance: number;
+  inviteRatio: number;
+  inviteRenewalRatio: number;
+}
+
+export interface InviteRecord {
+  id: number;
+  inviterUserId: number;
+  inviteeUserId: number;
+  inviteCode: string;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface InviteRewardRecord {
+  id: number;
+  orderId: number;
+  inviterUserId: number;
+  inviteeUserId: number;
+  rewardAmount: number;
+  ratio: number;
+  type: number;
+  createdTime?: number;
+  updatedTime?: number;
+  status: number;
+}
+
+export interface InviteRecordsData {
+  invites: InviteRecord[];
+  rewards: InviteRewardRecord[];
 }
 
 export interface Pagination {

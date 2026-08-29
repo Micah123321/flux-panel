@@ -43,6 +43,25 @@ export default function H5Layout({
       )
     },
     {
+      path: '/aggregate-forward',
+      label: '聚合',
+      icon: (
+        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v2a2 2 0 002 2h3v2H5a2 2 0 100 2h2v2H4a2 2 0 100 2h4a1 1 0 001-1v-3h2v3a1 1 0 001 1h4a2 2 0 100-2h-3v-2h2a2 2 0 100-2h-2V9h3a2 2 0 002-2V5a2 2 0 00-2-2H4zm0 2h12v2H4V5z" clipRule="evenodd" />
+        </svg>
+      ),
+      adminOnly: true
+    },
+    {
+      path: '/shop',
+      label: '套餐',
+      icon: (
+        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M4 3a2 2 0 00-2 2v2h16V5a2 2 0 00-2-2H4zM18 9H2v6a2 2 0 002 2h12a2 2 0 002-2V9zm-8 5a1 1 0 100-2 1 1 0 000 2z" />
+        </svg>
+      )
+    },
+    {
       path: '/tunnel',
       label: '隧道',
       icon: (
