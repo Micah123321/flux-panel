@@ -25,7 +25,11 @@ const dashboard = read('vite-frontend/src/pages/dashboard.tsx');
 assert.match(schema, /CREATE TABLE[\s\S]*?`package_plan`[\s\S]*?`daily_flow`/, 'package_plan 缺少 daily_flow');
 assert.equal(schema.match(/`daily_flow` bigint\(20\) NOT NULL DEFAULT '0'/g)?.length, 3, 'daily_flow 应出现在 package_plan/user/user_tunnel 三处');
 assert.match(installer, /CREATE TABLE IF NOT EXISTS \\`package_plan\\`[\s\S]*?\\`daily_flow\\`/, 'panel_install.sh package_plan 缺少 daily_flow');
-assert.match(installer, /ALTER TABLE \\`package_plan\\` ADD COLUMN \\`daily_flow\\`/, 'panel_install.sh 缺少 daily_flow 老库补列迁移');
+assert.match(installer, /ALTER TABLE \\`package_plan\\` ADD COLUMN \\`daily_flow\\`/, 'panel_install.sh 缺少 package_plan daily_flow 老库补列迁移');
+for (const [table, column] of [['user', 'daily_flow'], ['user', 'daily_in_flow'], ['user', 'daily_out_flow'], ['user_tunnel', 'daily_flow'], ['user_tunnel', 'daily_in_flow'], ['user_tunnel', 'daily_out_flow']]) {
+  const pattern = 'ALTER TABLE \\\\`' + table + '\\\\` ADD COLUMN \\\\`' + column + '\\\\`';
+  assert.match(installer, new RegExp(pattern), `panel_install.sh 缺少 ${table}.${column} 老库补列迁移`);
+}
 assert.equal(schema.match(/`daily_in_flow`/g)?.length, 2, 'daily_in_flow 应出现在 user/user_tunnel 两处');
 assert.equal(schema.match(/`daily_out_flow`/g)?.length, 2, 'daily_out_flow 应出现在 user/user_tunnel 两处');
 

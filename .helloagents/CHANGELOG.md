@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- 修复用户管理页打开时报 `数据库结构不完整，请执行面板更新后重试`：上一轮只补了 `package_plan.daily_flow`，但 `User`/`UserTunnel` 实体已包含 `daily_flow`、`daily_in_flow`、`daily_out_flow`，老库缺少这些列时用户列表和用户隧道查询会被 MyBatis-Plus 自动字段映射触发缺列异常。`panel_install.sh` 新增 `user` 与 `user_tunnel` 各 3 个日流量字段的幂等补列迁移，`tests/daily_flow_limit_check.mjs` 扩展安装脚本覆盖断言。自检：`node tests/daily_flow_limit_check.mjs`、`node tests/commerce_feature_check.mjs`、`bash -n panel_install.sh`、`npm run build` 通过。
 - 修复管理员添加套餐时 `Unknown column 'daily_flow'`：`panel_install.sh` 的 `package_plan` 建表补齐 `daily_flow`，并新增老库幂等补列迁移；后端缺列异常改为短提示并保留完整日志；管理员套餐表单改用 HeroUI Select 展示套餐类型/售卖状态/可见性/用户组，基础信息与权益限制分组展示，套餐卡片显示类型和公开/隐藏状态。自检：`node tests/daily_flow_limit_check.mjs`、`node tests/commerce_feature_check.mjs`、`npm run build`、`bash -n panel_install.sh` 通过；本机无 `mvn`/Maven Wrapper，未执行后端编译。
 - 修复 dashboard 无套餐/空套餐数据时误报 `获取套餐信息失败`：前端新增 `normalizePackageInfo` 空态规范化，`/user/package` 成功但 data/userInfo 为空时展示 0 配额/空隧道/空转发，不再因 `data.userInfo` 为空触发 catch；后端 `/user/package` DTO 对可空数字和列表统一做 0/空数组兜底。新手引导卡片改为点击关闭才写入 `guide_checklist_closed_admin|user`，并清理旧版自动写入的 `guide_checklist_seen_admin|user`，刷新页面不会自动消失。自检：`node tests/dashboard_empty_package_check.mjs` 与前端 `npm run build` 通过。
 

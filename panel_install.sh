@@ -1275,6 +1275,110 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- user 表：添加每日流量字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'daily_flow'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`daily_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "每日流量限制(GiB)，0=不限制" AFTER \`out_flow\`;',
+    'SELECT "Column \`daily_flow\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'daily_in_flow'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`daily_in_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用入站流量(字节)" AFTER \`daily_flow\`;',
+    'SELECT "Column \`daily_in_flow\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user'
+        AND column_name = 'daily_out_flow'
+    ),
+    'ALTER TABLE \`user\` ADD COLUMN \`daily_out_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用出站流量(字节)" AFTER \`daily_in_flow\`;',
+    'SELECT "Column \`daily_out_flow\` already exists in \`user\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- user_tunnel 表：添加每日流量字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user_tunnel'
+        AND column_name = 'daily_flow'
+    ),
+    'ALTER TABLE \`user_tunnel\` ADD COLUMN \`daily_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "每日流量限制(GiB)，0=不限制" AFTER \`out_flow\`;',
+    'SELECT "Column \`daily_flow\` already exists in \`user_tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user_tunnel'
+        AND column_name = 'daily_in_flow'
+    ),
+    'ALTER TABLE \`user_tunnel\` ADD COLUMN \`daily_in_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用入站流量(字节)" AFTER \`daily_flow\`;',
+    'SELECT "Column \`daily_in_flow\` already exists in \`user_tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'user_tunnel'
+        AND column_name = 'daily_out_flow'
+    ),
+    'ALTER TABLE \`user_tunnel\` ADD COLUMN \`daily_out_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用出站流量(字节)" AFTER \`daily_in_flow\`;',
+    'SELECT "Column \`daily_out_flow\` already exists in \`user_tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @sql = (
   SELECT IF(
     NOT EXISTS (

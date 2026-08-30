@@ -28,7 +28,7 @@
 
 ## 套餐管理修复（2026-08-30）
 
-- `package_plan.daily_flow` 必须同时存在于 `gost.sql` 和 `panel_install.sh`：安装脚本的 `CREATE TABLE IF NOT EXISTS package_plan` 包含该列，并在老库更新路径中用 information_schema 检查后幂等 `ALTER TABLE package_plan ADD COLUMN daily_flow ... AFTER flow`。
+- 日流量字段必须同时存在于 `gost.sql` 和 `panel_install.sh`：`package_plan.daily_flow`、`user.daily_flow/daily_in_flow/daily_out_flow`、`user_tunnel.daily_flow/daily_in_flow/daily_out_flow` 都需要老库幂等补列迁移。用户管理页会查询 `user` 实体全字段，缺少 `user.daily_*` 会触发缺列异常。
 - 管理员套餐页 `PlanSection.tsx` 中，`type` 当前只有保存语义，发放逻辑不按它分支；界面将 `1` 显示为“周期套餐”，真实开通时长仍由 `durationMultiplier * 30` 天决定。
 - 套餐保存失败时前端将 `daily_flow`/`Unknown column` 压缩为短提示；后端 `GlobalExceptionHandler` 对缺列异常返回“数据库结构不完整，请执行面板更新后重试”，完整异常保留在服务日志。
 
