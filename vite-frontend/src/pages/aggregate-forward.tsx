@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input, Textarea } from "@heroui/input";
@@ -108,6 +108,18 @@ const emptyForwardForm: ForwardForm = {
   remark: "",
 };
 
+const modeOptions = [
+  { key: "load_balance", label: "负载均衡", selector: "round" },
+  { key: "failover", label: "主备切换", selector: "fifo" },
+] as const;
+
+const AUTO_FORWARD_NAME_PREFIX = "聚合转发-";
+
+interface PortRange {
+  start: number;
+  end: number;
+}
+
 const modeLabel = (mode: AggregateForward["mode"]) => mode === "load_balance" ? "负载均衡" : "主备切换";
 const modeColor = (mode: AggregateForward["mode"]) => mode === "load_balance" ? "primary" : "warning";
 const formatBytes = (bytes?: number) => {
@@ -117,6 +129,52 @@ const formatBytes = (bytes?: number) => {
   if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
   return `${value} B`;
 };
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const nodeAddress = (node: NodeItem) => (node.serverIp || node.ip || "").trim();
+const uniqueValues = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
+const parseAddressList = (addresses: string) => uniqueValues(addresses.split(/[\s,，]+/).map((value) => value.trim()));
+
+const toggleAddressValue = (addresses: string, address: string) => {
+  const values = parseAddressList(addresses);
+  return values.includes(address) ? values.filter((value) => value !== address).join("\n") : [...values, address].join("\n");
+};
+
+const portRangeText = (range: PortRange | null) => range ? `${range.start}-${range.end}` : "-";
+
+const getCommonPortRange = (nodes: NodeItem[]): PortRange | null => {
+  if (nodes.length === 0) return null;
+  const ranges = nodes.map((node) => ({ start: node.portSta, end: node.portEnd }));
+  if (ranges.some((range) => !isFiniteNumber(range.start) || !isFiniteNumber(range.end) || range.start < 1 || range.end < range.start)) return null;
+  const start = Math.max(...ranges.map((range) => range.start as number));
+  const end = Math.min(...ranges.map((range) => range.end as number));
+  return start <= end ? { start, end } : null;
+};
+
+const resolveGroupNodes = (group: AggregateNodeGroup | null | undefined, nodeById: Map<number, NodeItem>) => {
+  if (!group) return [];
+  const groupNodesById = new Map((group.nodes || []).map((node) => [node.id, node]));
+  const ids = group.nodeIds?.length ? group.nodeIds : (group.nodes || []).map((node) => node.id);
+  return ids
+    .map((id) => {
+      const groupNode = groupNodesById.get(id);
+      const fullNode = nodeById.get(id);
+      if (!groupNode && !fullNode) return null;
+      return { ...(groupNode || {}), ...(fullNode || {}), id } as NodeItem;
+    })
+    .filter((node): node is NodeItem => Boolean(node));
+};
+
+const groupAddresses = (nodes: NodeItem[]) => uniqueValues(nodes.map(nodeAddress));
+const onlineNodeCount = (nodes: NodeItem[]) => nodes.filter((node) => node.status === 1).length;
+
+const autoForwardName = (entryGroup?: AggregateNodeGroup, exitGroup?: AggregateNodeGroup) => {
+  if (entryGroup && exitGroup) return `${AUTO_FORWARD_NAME_PREFIX}${entryGroup.name}-${exitGroup.name}`;
+  if (entryGroup) return `${AUTO_FORWARD_NAME_PREFIX}${entryGroup.name}`;
+  return "聚合转发";
+};
+
+const isAutoForwardName = (name: string) => name === "聚合转发" || name.startsWith(AUTO_FORWARD_NAME_PREFIX);
 
 export default function AggregateForwardPage() {
   const [loading, setLoading] = useState(true);
@@ -133,6 +191,105 @@ export default function AggregateForwardPage() {
   const [groupErrors, setGroupErrors] = useState<Record<string, string>>({});
   const [forwardErrors, setForwardErrors] = useState<Record<string, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const findGroup = (groupId: number | null | undefined) => groupId ? groups.find((group) => group.id === groupId) : undefined;
+  const getNodesForGroup = (group: AggregateNodeGroup | null | undefined) => resolveGroupNodes(group, nodeById);
+
+  const buildDefaultForwardForm = (): ForwardForm => {
+    const entryGroup = groups[0];
+    const exitGroup = groups[1] || entryGroup;
+    const entryNodes = getNodesForGroup(entryGroup);
+    const range = getCommonPortRange(entryNodes);
+    const defaultPort = range?.start ?? null;
+    return {
+      ...emptyForwardForm,
+      name: autoForwardName(entryGroup, exitGroup),
+      entryGroupId: entryGroup?.id ?? null,
+      exitGroupId: exitGroup?.id ?? null,
+      entryAddresses: groupAddresses(entryNodes).join("\n"),
+      entryPortStart: defaultPort,
+      entryPortEnd: defaultPort,
+      targetPortStart: defaultPort,
+      targetPortEnd: defaultPort,
+    };
+  };
+
+  const handleEntryGroupChange = (entryGroupId: number | null) => {
+    setForwardForm((prev) => {
+      const previousGroup = findGroup(prev.entryGroupId);
+      const nextGroup = findGroup(entryGroupId);
+      const previousNodes = getNodesForGroup(previousGroup);
+      const nextNodes = getNodesForGroup(nextGroup);
+      const previousAddresses = groupAddresses(previousNodes).join("\n");
+      const nextAddresses = groupAddresses(nextNodes).join("\n");
+      const previousRange = getCommonPortRange(previousNodes);
+      const nextRange = getCommonPortRange(nextNodes);
+      const replaceAddresses = !prev.entryAddresses.trim() || prev.entryAddresses.trim() === previousAddresses.trim();
+      const replaceEntryPorts = !prev.entryPortStart || !prev.entryPortEnd || Boolean(previousRange && prev.entryPortStart === previousRange.start && prev.entryPortEnd === previousRange.start);
+      const replaceTargetPorts = !prev.targetPortStart || !prev.targetPortEnd || Boolean(previousRange && prev.targetPortStart === previousRange.start && prev.targetPortEnd === previousRange.start);
+      const exitGroup = findGroup(prev.exitGroupId);
+      const next = { ...prev, entryGroupId };
+      if (nextAddresses && replaceAddresses) next.entryAddresses = nextAddresses;
+      if (nextRange && replaceEntryPorts) {
+        next.entryPortStart = nextRange.start;
+        next.entryPortEnd = nextRange.start;
+      }
+      if (nextRange && replaceTargetPorts) {
+        next.targetPortStart = nextRange.start;
+        next.targetPortEnd = nextRange.start;
+      }
+      if (!prev.name.trim() || isAutoForwardName(prev.name)) next.name = autoForwardName(nextGroup, exitGroup);
+      return next;
+    });
+  };
+
+  const handleExitGroupChange = (exitGroupId: number | null) => {
+    setForwardForm((prev) => {
+      const entryGroup = findGroup(prev.entryGroupId);
+      const exitGroup = findGroup(exitGroupId);
+      return {
+        ...prev,
+        exitGroupId,
+        name: !prev.name.trim() || isAutoForwardName(prev.name) ? autoForwardName(entryGroup, exitGroup) : prev.name,
+      };
+    });
+  };
+
+  const fillRecommendedPort = () => {
+    const entryGroup = findGroup(forwardForm.entryGroupId);
+    const range = getCommonPortRange(getNodesForGroup(entryGroup));
+    if (!range) return;
+    setForwardForm((prev) => ({
+      ...prev,
+      entryPortStart: range.start,
+      entryPortEnd: range.start,
+      targetPortStart: range.start,
+      targetPortEnd: range.start,
+    }));
+  };
+
+  const syncTargetPorts = () => {
+    if (!forwardForm.entryPortStart || !forwardForm.entryPortEnd) return;
+    setForwardForm((prev) => ({
+      ...prev,
+      targetPortStart: prev.entryPortStart,
+      targetPortEnd: prev.entryPortEnd,
+    }));
+  };
+
+  const toggleEntryAddress = (address: string) => {
+    setForwardForm((prev) => ({ ...prev, entryAddresses: toggleAddressValue(prev.entryAddresses, address) }));
+  };
+
+  const selectedEntryGroup = findGroup(forwardForm.entryGroupId);
+  const selectedExitGroup = findGroup(forwardForm.exitGroupId);
+  const selectedEntryNodes = getNodesForGroup(selectedEntryGroup);
+  const selectedExitNodes = getNodesForGroup(selectedExitGroup);
+  const entryCommonRange = getCommonPortRange(selectedEntryNodes);
+  const exitCommonRange = getCommonPortRange(selectedExitNodes);
+  const entryAddressOptions = groupAddresses(selectedEntryNodes);
+  const selectedAddressSet = new Set(parseAddressList(forwardForm.entryAddresses));
 
   useEffect(() => {
     loadData();
@@ -173,7 +330,7 @@ export default function AggregateForwardPage() {
   };
 
   const openCreateForward = () => {
-    setForwardForm(emptyForwardForm);
+    setForwardForm(buildDefaultForwardForm());
     setForwardErrors({});
     setForwardModalOpen(true);
   };
@@ -494,25 +651,67 @@ export default function AggregateForwardPage() {
         <ModalContent>
           {(onClose) => (
             <>
-              <ModalHeader>{forwardForm.id ? "编辑聚合转发" : "新增聚合转发"}</ModalHeader>
-              <ModalBody className="space-y-4">
-                <Input label="名称" value={forwardForm.name} onChange={(e) => setForwardForm((prev) => ({ ...prev, name: e.target.value }))} isInvalid={!!forwardErrors.name} errorMessage={forwardErrors.name} variant="bordered" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <GroupSelect label="入口节点组" value={forwardForm.entryGroupId} groups={groups} error={forwardErrors.entryGroupId} onChange={(entryGroupId) => setForwardForm((prev) => ({ ...prev, entryGroupId }))} />
-                  <GroupSelect label="出口节点组" value={forwardForm.exitGroupId} groups={groups} error={forwardErrors.exitGroupId} onChange={(exitGroupId) => setForwardForm((prev) => ({ ...prev, exitGroupId }))} />
-                </div>
-                <Textarea label="入口IP或域名" value={forwardForm.entryAddresses} onChange={(e) => setForwardForm((prev) => ({ ...prev, entryAddresses: e.target.value }))} isInvalid={!!forwardErrors.entryAddresses} errorMessage={forwardErrors.entryAddresses} variant="bordered" minRows={2} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <PortRangeInputs label="入口端口" start={forwardForm.entryPortStart} end={forwardForm.entryPortEnd} error={forwardErrors.entryPort} onStartChange={(entryPortStart) => setForwardForm((prev) => ({ ...prev, entryPortStart }))} onEndChange={(entryPortEnd) => setForwardForm((prev) => ({ ...prev, entryPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
-                  <PortRangeInputs label="出口端口" start={forwardForm.targetPortStart} end={forwardForm.targetPortEnd} error={forwardErrors.targetPort} onStartChange={(targetPortStart) => setForwardForm((prev) => ({ ...prev, targetPortStart }))} onEndChange={(targetPortEnd) => setForwardForm((prev) => ({ ...prev, targetPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
-                </div>
+              <ModalHeader className="flex flex-col gap-1">
+                <span>{forwardForm.id ? "编辑聚合转发" : "新增聚合转发"}</span>
+                <span className="text-sm font-normal text-default-500">{selectedEntryGroup && selectedExitGroup ? `${selectedEntryGroup.name} → ${selectedExitGroup.name}` : `${groups.length} 个节点组`}</span>
+              </ModalHeader>
+              <ModalBody className="space-y-5">
+                <section className="space-y-4 rounded-lg border border-divider p-4">
+                  <Input label="名称" value={forwardForm.name} onChange={(e) => setForwardForm((prev) => ({ ...prev, name: e.target.value }))} isInvalid={!!forwardErrors.name} errorMessage={forwardErrors.name} variant="bordered" />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <GroupSelect label="入口节点组" value={forwardForm.entryGroupId} groups={groups} error={forwardErrors.entryGroupId} onChange={handleEntryGroupChange} getGroupNodes={getNodesForGroup} />
+                    <GroupSelect label="出口节点组" value={forwardForm.exitGroupId} groups={groups} error={forwardErrors.exitGroupId} onChange={handleExitGroupChange} getGroupNodes={getNodesForGroup} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <GroupPreview title="入口组" group={selectedEntryGroup} nodes={selectedEntryNodes} range={entryCommonRange} />
+                    <GroupPreview title="出口组" group={selectedExitGroup} nodes={selectedExitNodes} range={exitCommonRange} />
+                  </div>
+                </section>
+
+                <section className="space-y-4 rounded-lg border border-divider p-4">
+                  <Textarea label="入口IP或域名" value={forwardForm.entryAddresses} onChange={(e) => setForwardForm((prev) => ({ ...prev, entryAddresses: e.target.value }))} isInvalid={!!forwardErrors.entryAddresses} errorMessage={forwardErrors.entryAddresses} variant="bordered" minRows={2} />
+                  {entryAddressOptions.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {entryAddressOptions.map((address) => {
+                        const selected = selectedAddressSet.has(address);
+                        return (
+                          <Button key={address} size="sm" color={selected ? "primary" : "default"} variant={selected ? "solid" : "flat"} className="max-w-full justify-start" onPress={() => toggleEntryAddress(address)}>
+                            <span className="truncate">{address}</span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-4 rounded-lg border border-divider p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <PortRangeInputs label="入口端口" start={forwardForm.entryPortStart} end={forwardForm.entryPortEnd} range={entryCommonRange} error={forwardErrors.entryPort} onStartChange={(entryPortStart) => setForwardForm((prev) => ({ ...prev, entryPortStart }))} onEndChange={(entryPortEnd) => setForwardForm((prev) => ({ ...prev, entryPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
+                    <PortRangeInputs label="出口端口" start={forwardForm.targetPortStart} end={forwardForm.targetPortEnd} error={forwardErrors.targetPort} onStartChange={(targetPortStart) => setForwardForm((prev) => ({ ...prev, targetPortStart }))} onEndChange={(targetPortEnd) => setForwardForm((prev) => ({ ...prev, targetPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="flat" isDisabled={!entryCommonRange} onPress={fillRecommendedPort}>推荐端口 {entryCommonRange ? entryCommonRange.start : "-"}</Button>
+                    <Button size="sm" variant="flat" isDisabled={!forwardForm.entryPortStart || !forwardForm.entryPortEnd} onPress={syncTargetPorts}>出口端口跟随入口</Button>
+                  </div>
+                </section>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Select label="模式" selectedKeys={[forwardForm.mode]} onSelectionChange={(keys) => setForwardForm((prev) => ({ ...prev, mode: Array.from(keys)[0] as ForwardForm["mode"] }))} variant="bordered">
-                    <SelectItem key="load_balance">负载均衡</SelectItem>
-                    <SelectItem key="failover">主备切换</SelectItem>
+                  <Select label="模式" selectedKeys={[forwardForm.mode]} onSelectionChange={(keys) => {
+                    if (keys === "all") return;
+                    const selectedKey = Array.from(keys)[0] as ForwardForm["mode"] | undefined;
+                    if (selectedKey) setForwardForm((prev) => ({ ...prev, mode: selectedKey }));
+                  }} variant="bordered">
+                    {modeOptions.map((option) => (
+                      <SelectItem key={option.key} textValue={option.label}>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>{option.label}</span>
+                          <Chip size="sm" variant="flat">{option.selector}</Chip>
+                        </div>
+                      </SelectItem>
+                    ))}
                   </Select>
                   <Input label="倍率" type="number" min={0.1} step={0.1} value={forwardForm.trafficRatio.toString()} onChange={(e) => setForwardForm((prev) => ({ ...prev, trafficRatio: Number(e.target.value) }))} isInvalid={!!forwardErrors.trafficRatio} errorMessage={forwardErrors.trafficRatio} variant="bordered" />
-                  <Input label="出口网卡" value={forwardForm.interfaceName} onChange={(e) => setForwardForm((prev) => ({ ...prev, interfaceName: e.target.value }))} variant="bordered" />
+                  <Input label="出口网卡" placeholder="默认网卡" value={forwardForm.interfaceName} onChange={(e) => setForwardForm((prev) => ({ ...prev, interfaceName: e.target.value }))} variant="bordered" />
                 </div>
                 <Textarea label="备注" value={forwardForm.remark} onChange={(e) => setForwardForm((prev) => ({ ...prev, remark: e.target.value }))} variant="bordered" minRows={2} />
               </ModalBody>
@@ -554,23 +753,72 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function GroupSelect({ label, value, groups, error, onChange }: { label: string; value: number | null; groups: AggregateNodeGroup[]; error?: string; onChange: (value: number | null) => void }) {
+function GroupSelect({
+  label,
+  value,
+  groups,
+  error,
+  onChange,
+  getGroupNodes,
+}: {
+  label: string;
+  value: number | null;
+  groups: AggregateNodeGroup[];
+  error?: string;
+  onChange: (value: number | null) => void;
+  getGroupNodes: (group: AggregateNodeGroup | null | undefined) => NodeItem[];
+}) {
   return (
     <Select
       label={label}
+      placeholder="选择节点组"
       selectedKeys={value ? [value.toString()] : []}
       onSelectionChange={(keys) => {
+        if (keys === "all") return;
         const selectedKey = Array.from(keys)[0] as string | undefined;
         onChange(selectedKey ? Number(selectedKey) : null);
       }}
       isInvalid={!!error}
       errorMessage={error}
       variant="bordered"
+      isDisabled={groups.length === 0}
     >
-      {groups.map((group) => (
-        <SelectItem key={group.id}>{group.name}</SelectItem>
-      ))}
+      {groups.map((group) => {
+        const nodes = getGroupNodes(group);
+        const range = getCommonPortRange(nodes);
+        return (
+          <SelectItem key={String(group.id)} textValue={group.name}>
+            <div className="flex flex-col gap-1 py-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate font-medium">{group.name}</span>
+                <span className="shrink-0 text-xs text-default-500">{nodes.length} 节点</span>
+              </div>
+              <div className="truncate text-xs text-default-500">{onlineNodeCount(nodes)}/{nodes.length} 在线 · 端口 {portRangeText(range)}</div>
+            </div>
+          </SelectItem>
+        );
+      })}
     </Select>
+  );
+}
+
+function GroupPreview({ title, group, nodes, range }: { title: string; group?: AggregateNodeGroup; nodes: NodeItem[]; range: PortRange | null }) {
+  return (
+    <div className="min-h-24 rounded-lg border border-divider px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-foreground">{title}</span>
+        <Chip size="sm" variant="flat" color={nodes.length > 0 ? "primary" : "default"}>{nodes.length} 节点</Chip>
+      </div>
+      <div className="mt-2 text-xs text-default-500">{group?.name || "-"} · {onlineNodeCount(nodes)}/{nodes.length} 在线 · 端口 {portRangeText(range)}</div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {nodes.slice(0, 6).map((node) => (
+          <Chip key={node.id} size="sm" variant="flat" color={node.status === 1 ? "success" : "default"}>
+            {node.name}
+          </Chip>
+        ))}
+        {nodes.length > 6 && <Chip size="sm" variant="flat">+{nodes.length - 6}</Chip>}
+      </div>
+    </div>
   );
 }
 
@@ -578,6 +826,7 @@ function PortRangeInputs({
   label,
   start,
   end,
+  range,
   error,
   onStartChange,
   onEndChange,
@@ -587,6 +836,7 @@ function PortRangeInputs({
   label: string;
   start: number | null;
   end: number | null;
+  range?: PortRange | null;
   error?: string;
   onStartChange: (value: number | null) => void;
   onEndChange: (value: number | null) => void;
@@ -596,9 +846,10 @@ function PortRangeInputs({
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-3">
-        <Input label={`${label}起始`} type="number" value={numberValue(start)} onChange={(e) => onStartChange(setNumber(e.target.value))} isInvalid={!!error} variant="bordered" />
-        <Input label={`${label}结束`} type="number" value={numberValue(end)} onChange={(e) => onEndChange(setNumber(e.target.value))} isInvalid={!!error} variant="bordered" />
+        <Input label={`${label}起始`} type="number" min={1} max={65535} step={1} value={numberValue(start)} onChange={(e) => onStartChange(setNumber(e.target.value))} isInvalid={!!error} variant="bordered" />
+        <Input label={`${label}结束`} type="number" min={1} max={65535} step={1} value={numberValue(end)} onChange={(e) => onEndChange(setNumber(e.target.value))} isInvalid={!!error} variant="bordered" />
       </div>
+      {range && <p className="text-xs text-default-500">公共范围 {portRangeText(range)}</p>}
       {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );

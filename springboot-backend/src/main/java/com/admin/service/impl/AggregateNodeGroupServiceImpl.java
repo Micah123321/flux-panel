@@ -165,6 +165,8 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
             item.put("name", node.getName());
             item.put("ip", node.getIp());
             item.put("serverIp", node.getServerIp());
+            item.put("portSta", node.getPortSta());
+            item.put("portEnd", node.getPortEnd());
             item.put("status", node.getStatus());
             nodes.add(item);
         }
