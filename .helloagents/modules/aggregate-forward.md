@@ -16,7 +16,7 @@
 
 ## 历史数据清理
 
-- 历史 `aggregate_forward` 记录可能已经铺设大量 `agf_<id>_<port>_{tcp,udp}` 服务。删除接口使用 `GostUtil.DeleteServices` 批量删除服务名，并对 `not found` 做二分收敛，避免按端口串行等待。
+- 历史 `aggregate_forward` 记录可能已经铺设大量 `agf_<id>_<port>_{tcp,udp}` 服务。删除接口使用 `GostUtil.DeleteServices` 批量删除服务名，并对 `not found` 做二分收敛；Go 节点端必须路由 `DeleteServices` 到现有批量删除 handler，避免回落为未知命令。
 - 若 DB 行已经先被清掉，节点配置上报清理会识别 `agf_` 历史服务；只处理 TCP 侧并调用 `DeleteService` 删除对应 tcp/udp 对。
 - 清理顺序：先用后端 legacy delete 清理 GOST 服务，再删除 DB 记录；不要先手动删 DB 行。
 

@@ -10,6 +10,7 @@ const aggregateService = read('springboot-backend/src/main/java/com/admin/servic
 const tunnelDto = read('springboot-backend/src/main/java/com/admin/common/dto/TunnelDto.java');
 const tunnelEntity = read('springboot-backend/src/main/java/com/admin/entity/Tunnel.java');
 const forwardService = read('springboot-backend/src/main/java/com/admin/service/impl/ForwardServiceImpl.java');
+const nodeSocket = read('go-gost/x/socket/websocket_reporter.go');
 
 assert.match(groupService, /item\.put\("portSta", node\.getPortSta\(\)\);/, '节点组接口未返回 portSta');
 assert.match(groupService, /item\.put\("portEnd", node\.getPortEnd\(\)\);/, '节点组接口未返回 portEnd');
@@ -36,6 +37,7 @@ assert.match(aggregateService, /DEPRECATED_FORWARD_MSG/, '聚合转发服务缺�
 assert.match(aggregateService, /return R\.err\(DEPRECATED_FORWARD_MSG\);/, '聚合转发创建/更新未下线');
 assert.doesNotMatch(aggregateService, /MAX_PORT_SPAN = 10001/, '后端仍允许 10001 端口聚合规则');
 assert.match(aggregateService, /DeleteServices/, 'legacy 聚合转发删除未使用批量删除');
+assert.match(nodeSocket, /case \"DeleteServices\":/, '节点端未路由 DeleteServices 批量删除命令');
 
 const syncTask = read('springboot-backend/src/main/java/com/admin/common/task/CheckGostConfigAsync.java');
 assert.match(syncTask, /isLegacyAggregateService/, '配置上报清理未识别 agf_ 历史服务');

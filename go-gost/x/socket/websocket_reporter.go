@@ -517,6 +517,9 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 	case "DeleteService":
 		err = w.handleDeleteService(cmd.Data)
 		response.Type = "DeleteServiceResponse"
+	case "DeleteServices":
+		err = w.handleDeleteService(cmd.Data)
+		response.Type = "DeleteServicesResponse"
 	case "PauseService":
 		err = w.handlePauseService(cmd.Data)
 		response.Type = "PauseServiceResponse"
