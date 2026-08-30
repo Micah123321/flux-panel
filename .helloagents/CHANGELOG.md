@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- 修复聚合转发端口推荐：新增弹窗按入口/出口节点组公共端口范围自动填入同等数量的入口和出口端口，推荐按钮展示推荐范围与数量；前后端单次端口上限从 200 提升到 10001，覆盖默认 50000-60000 全范围。扩展 `tests/aggregate_forward_ui_check.mjs` 校验前后端限制一致。自检：`node tests/aggregate_forward_ui_check.mjs`、`npm run build` 通过；本机无 `mvn`/Maven Wrapper，未执行后端编译。
 - 优化节点聚合的“新增聚合转发”弹窗：节点组下拉改为展示节点数、在线数和公共端口范围；弹窗内展示入口/出口组预览；新增时自动带出默认名称、入口/出口节点组、入口地址、入口端口和出口端口；入口地址支持从节点地址候选点选，端口支持推荐值和出口端口跟随入口。后端节点组列表补充返回成员节点 `portSta`/`portEnd`。新增 `tests/aggregate_forward_ui_check.mjs` 静态检查。自检：`node tests/aggregate_forward_ui_check.mjs`、`npm run build` 通过。
 - 修复用户管理页打开时报 `数据库结构不完整，请执行面板更新后重试`：上一轮只补了 `package_plan.daily_flow`，但 `User`/`UserTunnel` 实体已包含 `daily_flow`、`daily_in_flow`、`daily_out_flow`，老库缺少这些列时用户列表和用户隧道查询会被 MyBatis-Plus 自动字段映射触发缺列异常。`panel_install.sh` 新增 `user` 与 `user_tunnel` 各 3 个日流量字段的幂等补列迁移，`tests/daily_flow_limit_check.mjs` 扩展安装脚本覆盖断言。自检：`node tests/daily_flow_limit_check.mjs`、`node tests/commerce_feature_check.mjs`、`bash -n panel_install.sh`、`npm run build` 通过。
 - 修复管理员添加套餐时 `Unknown column 'daily_flow'`：`panel_install.sh` 的 `package_plan` 建表补齐 `daily_flow`，并新增老库幂等补列迁移；后端缺列异常改为短提示并保留完整日志；管理员套餐表单改用 HeroUI Select 展示套餐类型/售卖状态/可见性/用户组，基础信息与权益限制分组展示，套餐卡片显示类型和公开/隐藏状态。自检：`node tests/daily_flow_limit_check.mjs`、`node tests/commerce_feature_check.mjs`、`npm run build`、`bash -n panel_install.sh` 通过；本机无 `mvn`/Maven Wrapper，未执行后端编译。

@@ -22,7 +22,7 @@ import {
   updateAggregateNodeGroup,
 } from "@/api";
 
-const MAX_PORT_SPAN = 200;
+const MAX_PORT_SPAN = 10001;
 
 interface NodeItem {
   id: number;
@@ -141,6 +141,9 @@ const toggleAddressValue = (addresses: string, address: string) => {
 };
 
 const portRangeText = (range: PortRange | null) => range ? `${range.start}-${range.end}` : "-";
+const portRangeSpan = (range: PortRange) => range.end - range.start + 1;
+const samePortRange = (start: number | null, end: number | null, range?: PortRange | null) => Boolean(range && start === range.start && end === range.end);
+const trimPortRange = (range: PortRange, span: number): PortRange => ({ start: range.start, end: range.start + span - 1 });
 
 const getCommonPortRange = (nodes: NodeItem[]): PortRange | null => {
   if (nodes.length === 0) return null;
@@ -163,6 +166,19 @@ const resolveGroupNodes = (group: AggregateNodeGroup | null | undefined, nodeByI
       return { ...(groupNode || {}), ...(fullNode || {}), id } as NodeItem;
     })
     .filter((node): node is NodeItem => Boolean(node));
+};
+
+const getRecommendedPortRanges = (entryNodes: NodeItem[], exitNodes: NodeItem[]) => {
+  const entryRange = getCommonPortRange(entryNodes);
+  const exitRange = getCommonPortRange(exitNodes);
+  if (!entryRange) return null;
+  const targetRange = exitRange || entryRange;
+  const span = Math.min(portRangeSpan(entryRange), portRangeSpan(targetRange), MAX_PORT_SPAN);
+  return {
+    entry: trimPortRange(entryRange, span),
+    target: trimPortRange(targetRange, span),
+    span,
+  };
 };
 
 const groupAddresses = (nodes: NodeItem[]) => uniqueValues(nodes.map(nodeAddress));
@@ -200,18 +216,18 @@ export default function AggregateForwardPage() {
     const entryGroup = groups[0];
     const exitGroup = groups[1] || entryGroup;
     const entryNodes = getNodesForGroup(entryGroup);
-    const range = getCommonPortRange(entryNodes);
-    const defaultPort = range?.start ?? null;
+    const exitNodes = getNodesForGroup(exitGroup);
+    const recommended = getRecommendedPortRanges(entryNodes, exitNodes);
     return {
       ...emptyForwardForm,
       name: autoForwardName(entryGroup, exitGroup),
       entryGroupId: entryGroup?.id ?? null,
       exitGroupId: exitGroup?.id ?? null,
       entryAddresses: groupAddresses(entryNodes).join("\n"),
-      entryPortStart: defaultPort,
-      entryPortEnd: defaultPort,
-      targetPortStart: defaultPort,
-      targetPortEnd: defaultPort,
+      entryPortStart: recommended?.entry.start ?? null,
+      entryPortEnd: recommended?.entry.end ?? null,
+      targetPortStart: recommended?.target.start ?? null,
+      targetPortEnd: recommended?.target.end ?? null,
     };
   };
 
@@ -223,21 +239,21 @@ export default function AggregateForwardPage() {
       const nextNodes = getNodesForGroup(nextGroup);
       const previousAddresses = groupAddresses(previousNodes).join("\n");
       const nextAddresses = groupAddresses(nextNodes).join("\n");
-      const previousRange = getCommonPortRange(previousNodes);
-      const nextRange = getCommonPortRange(nextNodes);
-      const replaceAddresses = !prev.entryAddresses.trim() || prev.entryAddresses.trim() === previousAddresses.trim();
-      const replaceEntryPorts = !prev.entryPortStart || !prev.entryPortEnd || Boolean(previousRange && prev.entryPortStart === previousRange.start && prev.entryPortEnd === previousRange.start);
-      const replaceTargetPorts = !prev.targetPortStart || !prev.targetPortEnd || Boolean(previousRange && prev.targetPortStart === previousRange.start && prev.targetPortEnd === previousRange.start);
       const exitGroup = findGroup(prev.exitGroupId);
+      const previousRecommended = getRecommendedPortRanges(previousNodes, getNodesForGroup(exitGroup));
+      const nextRecommended = getRecommendedPortRanges(nextNodes, getNodesForGroup(exitGroup));
+      const replaceAddresses = !prev.entryAddresses.trim() || prev.entryAddresses.trim() === previousAddresses.trim();
+      const replaceEntryPorts = !prev.entryPortStart || !prev.entryPortEnd || samePortRange(prev.entryPortStart, prev.entryPortEnd, previousRecommended?.entry);
+      const replaceTargetPorts = !prev.targetPortStart || !prev.targetPortEnd || samePortRange(prev.targetPortStart, prev.targetPortEnd, previousRecommended?.target);
       const next = { ...prev, entryGroupId };
       if (nextAddresses && replaceAddresses) next.entryAddresses = nextAddresses;
-      if (nextRange && replaceEntryPorts) {
-        next.entryPortStart = nextRange.start;
-        next.entryPortEnd = nextRange.start;
+      if (nextRecommended && replaceEntryPorts) {
+        next.entryPortStart = nextRecommended.entry.start;
+        next.entryPortEnd = nextRecommended.entry.end;
       }
-      if (nextRange && replaceTargetPorts) {
-        next.targetPortStart = nextRange.start;
-        next.targetPortEnd = nextRange.start;
+      if (nextRecommended && replaceTargetPorts) {
+        next.targetPortStart = nextRecommended.target.start;
+        next.targetPortEnd = nextRecommended.target.end;
       }
       if (!prev.name.trim() || isAutoForwardName(prev.name)) next.name = autoForwardName(nextGroup, exitGroup);
       return next;
@@ -247,25 +263,36 @@ export default function AggregateForwardPage() {
   const handleExitGroupChange = (exitGroupId: number | null) => {
     setForwardForm((prev) => {
       const entryGroup = findGroup(prev.entryGroupId);
+      const previousExitGroup = findGroup(prev.exitGroupId);
       const exitGroup = findGroup(exitGroupId);
-      return {
+      const entryNodes = getNodesForGroup(entryGroup);
+      const previousRecommended = getRecommendedPortRanges(entryNodes, getNodesForGroup(previousExitGroup));
+      const nextRecommended = getRecommendedPortRanges(entryNodes, getNodesForGroup(exitGroup));
+      const replaceTargetPorts = !prev.targetPortStart || !prev.targetPortEnd || samePortRange(prev.targetPortStart, prev.targetPortEnd, previousRecommended?.target);
+      const next = {
         ...prev,
         exitGroupId,
         name: !prev.name.trim() || isAutoForwardName(prev.name) ? autoForwardName(entryGroup, exitGroup) : prev.name,
       };
+      if (nextRecommended && replaceTargetPorts) {
+        next.targetPortStart = nextRecommended.target.start;
+        next.targetPortEnd = nextRecommended.target.end;
+      }
+      return next;
     });
   };
 
   const fillRecommendedPort = () => {
     const entryGroup = findGroup(forwardForm.entryGroupId);
-    const range = getCommonPortRange(getNodesForGroup(entryGroup));
-    if (!range) return;
+    const exitGroup = findGroup(forwardForm.exitGroupId);
+    const recommended = getRecommendedPortRanges(getNodesForGroup(entryGroup), getNodesForGroup(exitGroup));
+    if (!recommended) return;
     setForwardForm((prev) => ({
       ...prev,
-      entryPortStart: range.start,
-      entryPortEnd: range.start,
-      targetPortStart: range.start,
-      targetPortEnd: range.start,
+      entryPortStart: recommended.entry.start,
+      entryPortEnd: recommended.entry.end,
+      targetPortStart: recommended.target.start,
+      targetPortEnd: recommended.target.end,
     }));
   };
 
@@ -290,6 +317,7 @@ export default function AggregateForwardPage() {
   const exitCommonRange = getCommonPortRange(selectedExitNodes);
   const entryAddressOptions = groupAddresses(selectedEntryNodes);
   const selectedAddressSet = new Set(parseAddressList(forwardForm.entryAddresses));
+  const recommendedPortRanges = getRecommendedPortRanges(selectedEntryNodes, selectedExitNodes);
 
   useEffect(() => {
     loadData();
@@ -687,10 +715,10 @@ export default function AggregateForwardPage() {
                 <section className="space-y-4 rounded-lg border border-divider p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <PortRangeInputs label="入口端口" start={forwardForm.entryPortStart} end={forwardForm.entryPortEnd} range={entryCommonRange} error={forwardErrors.entryPort} onStartChange={(entryPortStart) => setForwardForm((prev) => ({ ...prev, entryPortStart }))} onEndChange={(entryPortEnd) => setForwardForm((prev) => ({ ...prev, entryPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
-                    <PortRangeInputs label="出口端口" start={forwardForm.targetPortStart} end={forwardForm.targetPortEnd} error={forwardErrors.targetPort} onStartChange={(targetPortStart) => setForwardForm((prev) => ({ ...prev, targetPortStart }))} onEndChange={(targetPortEnd) => setForwardForm((prev) => ({ ...prev, targetPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
+                    <PortRangeInputs label="出口端口" start={forwardForm.targetPortStart} end={forwardForm.targetPortEnd} range={exitCommonRange} error={forwardErrors.targetPort} onStartChange={(targetPortStart) => setForwardForm((prev) => ({ ...prev, targetPortStart }))} onEndChange={(targetPortEnd) => setForwardForm((prev) => ({ ...prev, targetPortEnd }))} numberValue={numberValue} setNumber={setNumber} />
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="flat" isDisabled={!entryCommonRange} onPress={fillRecommendedPort}>推荐端口 {entryCommonRange ? entryCommonRange.start : "-"}</Button>
+                    <Button size="sm" variant="flat" isDisabled={!recommendedPortRanges} onPress={fillRecommendedPort}>推荐端口 {recommendedPortRanges ? `${portRangeText(recommendedPortRanges.entry)} · ${recommendedPortRanges.span} 个` : "-"}</Button>
                     <Button size="sm" variant="flat" isDisabled={!forwardForm.entryPortStart || !forwardForm.entryPortEnd} onPress={syncTargetPorts}>出口端口跟随入口</Button>
                   </div>
                 </section>

@@ -42,8 +42,8 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
     private static final String MODE_LOAD_BALANCE = "load_balance";
     private static final String MODE_FAILOVER = "failover";
     private static final String GOST_SUCCESS_MSG = "OK";
-    // ha-min: 每个端口会在每个入口节点生成 TCP/UDP 服务；超过 200 个端口时应改为后台批处理与进度回滚。
-    private static final int MAX_PORT_SPAN = 200;
+    // ha-min: 默认节点范围 50000-60000 是 10001 个端口；超过该上限应改为后台批处理与进度回滚。
+    private static final int MAX_PORT_SPAN = 10001;
 
     @Resource
     private AggregateNodeGroupService aggregateNodeGroupService;
