@@ -100,9 +100,56 @@ interface AdminSummary {
   recentFlows: HourFlow[];
 }
 
+interface PackageInfoData {
+  userInfo?: Partial<UserInfo> | null;
+  tunnelPermissions?: UserTunnel[] | null;
+  forwards?: Forward[] | null;
+  statisticsFlows?: StatisticsFlow[] | null;
+}
+
+const emptyUserInfo: UserInfo = {
+  flow: 0,
+  inFlow: 0,
+  outFlow: 0,
+  dailyFlow: 0,
+  dailyInFlow: 0,
+  dailyOutFlow: 0,
+  num: 0,
+};
+
+const guideRole = (isAdmin: boolean) => (isAdmin ? 'admin' : 'user');
+const getGuideClosedKey = (isAdmin: boolean) => `guide_checklist_closed_${guideRole(isAdmin)}`;
+const getLegacyGuideSeenKey = (isAdmin: boolean) => `guide_checklist_seen_${guideRole(isAdmin)}`;
+
+const toNumber = (value: number | null | undefined): number => value ?? 0;
+
+const normalizeUserInfo = (value?: Partial<UserInfo> | null): UserInfo => {
+  const userInfo = { ...emptyUserInfo, ...(value || {}) };
+
+  return {
+    ...userInfo,
+    flow: toNumber(userInfo.flow),
+    inFlow: toNumber(userInfo.inFlow),
+    outFlow: toNumber(userInfo.outFlow),
+    dailyFlow: toNumber(userInfo.dailyFlow),
+    dailyInFlow: toNumber(userInfo.dailyInFlow),
+    dailyOutFlow: toNumber(userInfo.dailyOutFlow),
+    num: toNumber(userInfo.num),
+  };
+};
+
+const asArray = <T,>(value?: T[] | null): T[] => (Array.isArray(value) ? value : []);
+
+const normalizePackageInfo = (data?: PackageInfoData | null) => ({
+  userInfo: normalizeUserInfo(data?.userInfo),
+  tunnelPermissions: asArray(data?.tunnelPermissions),
+  forwards: asArray(data?.forwards),
+  statisticsFlows: asArray(data?.statisticsFlows),
+});
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
-  const [userInfo, setUserInfo] = useState<UserInfo>({} as UserInfo);
+  const [userInfo, setUserInfo] = useState<UserInfo>(emptyUserInfo);
   const [userTunnels, setUserTunnels] = useState<UserTunnel[]>([]);
   const [forwardList, setForwardList] = useState<Forward[]>([]);
   const [statisticsFlows, setStatisticsFlows] = useState<StatisticsFlow[]>([]);
@@ -207,42 +254,49 @@ export default function DashboardPage() {
   useEffect(() => {
     // 重置状态并加载数据，防止页面切换时显示旧数据
     setLoading(true);
-    setUserInfo({} as UserInfo);
+    setUserInfo(emptyUserInfo);
     setUserTunnels([]);
     setForwardList([]);
     setStatisticsFlows([]);
     
     // 检查用户是否是管理员
     const adminStatus = localStorage.getItem('admin');
-    setIsAdmin(adminStatus === 'true');
-    // 首次登录展示引导卡片（按角色记录，看过即不再弹）
-    const guideKey = 'guide_checklist_seen_' + (adminStatus === 'true' ? 'admin' : 'user');
-    if (localStorage.getItem(guideKey) !== '1') {
-      setShowGuideCard(true);
-      localStorage.setItem(guideKey, '1');
-    }
+    const isAdminUser = adminStatus === 'true';
+    setIsAdmin(isAdminUser);
+    // 引导卡片只有用户主动关闭后才不再显示，刷新页面不会自动消失
+    localStorage.removeItem(getLegacyGuideSeenKey(isAdminUser));
+    const guideKey = getGuideClosedKey(isAdminUser);
+    setShowGuideCard(localStorage.getItem(guideKey) !== '1');
     
     loadPackageData();
-    if (adminStatus === 'true') {
+    if (isAdminUser) {
       loadAdminSummary();
     }
     localStorage.setItem('e', '/dashboard');
   }, []);
+
+  const applyPackageData = (rawData?: PackageInfoData | null) => {
+    const data = normalizePackageInfo(rawData);
+    setUserInfo(data.userInfo);
+    setUserTunnels(data.tunnelPermissions);
+    setForwardList(data.forwards);
+    setStatisticsFlows(data.statisticsFlows);
+    checkExpirationNotifications(data.userInfo, data.tunnelPermissions);
+  };
+
+  const closeGuideCard = () => {
+    localStorage.setItem(getGuideClosedKey(isAdmin), '1');
+    setShowGuideCard(false);
+  };
 
   const loadPackageData = async () => {
     setLoading(true);
     try {
       const res = await getUserPackageInfo();
       if (res.code === 0) {
-        const data = res.data;
-        setUserInfo(data.userInfo || {});
-        setUserTunnels(data.tunnelPermissions || []);
-        setForwardList(data.forwards || []);
-        setStatisticsFlows(data.statisticsFlows || []);
-        
-        // 检查有效期并显示通知
-        checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
+        applyPackageData(res.data as PackageInfoData | null);
       } else {
+        applyPackageData(null);
         toast.error(res.msg || '获取套餐信息失败');
       }
     } catch (error) {
@@ -660,7 +714,7 @@ export default function DashboardPage() {
         {/* 首次登录引导卡片（独立开关，不影响其他区块） */}
         {showGuideCard && (
           <div className="mb-6 lg:mb-8">
-            <GuideChecklist isAdmin={isAdmin} onSkip={() => setShowGuideCard(false)} />
+            <GuideChecklist isAdmin={isAdmin} onSkip={closeGuideCard} />
           </div>
         )}
 

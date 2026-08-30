@@ -15,7 +15,7 @@ const userService = read('springboot-backend/src/main/java/com/admin/service/imp
 const flowController = read('springboot-backend/src/main/java/com/admin/controller/FlowController.java');
 const resetTask = read('springboot-backend/src/main/java/com/admin/common/task/ResetFlowAsync.java');
 const planTypes = read('vite-frontend/src/types/index.ts');
-const adminPage = read('vite-frontend/src/pages/commerce-admin.tsx');
+const adminPlanSection = read('vite-frontend/src/pages/commerce-admin/PlanSection.tsx');
 const commercePage = read('vite-frontend/src/pages/commerce.tsx');
 const dashboard = read('vite-frontend/src/pages/dashboard.tsx');
 
@@ -36,7 +36,7 @@ for (const field of ['dailyFlow', 'dailyInFlow', 'dailyOutFlow']) {
 assert.match(commerceDto, /private Long dailyFlow;/, 'PackagePlanRequest 缺少 dailyFlow');
 assert.match(commerceDto, /@Min\(value = 0, message = "每日流量限制不能小于0"\)/, 'dailyFlow 缺少校验');
 for (const field of ['dailyFlow', 'dailyInFlow', 'dailyOutFlow']) {
-  assert.match(userService, new RegExp(`userInfo.set${field.charAt(0).toUpperCase()}${field.slice(1)}\\(user\\.get${field.charAt(0).toUpperCase()}${field.slice(1)}\\(\\)\\);`), `buildUserInfoDto 未透出 ${field}`);
+  assert.match(userService, new RegExp(`userInfo.set${field.charAt(0).toUpperCase()}${field.slice(1)}\\(valueOrZero\\(user\\.get${field.charAt(0).toUpperCase()}${field.slice(1)}\\(\\)\\)\\);`), `buildUserInfoDto 未透出 ${field}`);
 }
 
 // 4. 套餐发放链路：applyPackage 与 syncUserGroupTunnels 写入日限并清零日计数
@@ -59,7 +59,7 @@ assert.match(resetTask, /daily_in_flow = 0, daily_out_flow = 0/, '缺少日计�
 
 // 7. 前端：类型 + 管理表单 + 购买页 + 用户侧展示
 assert.match(planTypes, /dailyFlow: number;/, 'PackagePlan 类型缺少 dailyFlow');
-assert.match(adminPage, /每日流量限制（GiB，0为不限制）/, '管理表单缺少每日流量输入');
+assert.match(adminPlanSection, /每日流量限制（GiB，0为不限制）/, '管理表单缺少每日流量输入');
 assert.match(commercePage, /日限 \$\{plan\.dailyFlow\} GiB|不限日流量/, '购买页缺少日限展示');
 assert.match(dashboard, /今日流量/, '用户侧缺少今日流量展示');
 

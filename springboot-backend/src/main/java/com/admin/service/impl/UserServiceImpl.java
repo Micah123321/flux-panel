@@ -690,9 +690,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 5. 构造返回结果
         UserPackageDto packageDto = new UserPackageDto();
         packageDto.setUserInfo(userInfo);
-        packageDto.setTunnelPermissions(tunnelPermissions);
-        packageDto.setForwards(forwards);
-        packageDto.setStatisticsFlows(statisticsFlows);
+        packageDto.setTunnelPermissions(listOrEmpty(tunnelPermissions));
+        packageDto.setForwards(listOrEmpty(forwards));
+        packageDto.setStatisticsFlows(listOrEmpty(statisticsFlows));
 
         return packageDto;
     }
@@ -707,14 +707,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         UserPackageDto.UserInfoDto userInfo = new UserPackageDto.UserInfoDto();
         userInfo.setId(user.getId());
         userInfo.setUser(user.getUser());
-        userInfo.setStatus(user.getStatus());
-        userInfo.setFlow(user.getFlow());
-        userInfo.setInFlow(user.getInFlow());
-        userInfo.setOutFlow(user.getOutFlow());
-        userInfo.setDailyFlow(user.getDailyFlow());
-        userInfo.setDailyInFlow(user.getDailyInFlow());
-        userInfo.setDailyOutFlow(user.getDailyOutFlow());
-        userInfo.setNum(user.getNum());
+        userInfo.setStatus(valueOrZero(user.getStatus()));
+        userInfo.setFlow(valueOrZero(user.getFlow()));
+        userInfo.setInFlow(valueOrZero(user.getInFlow()));
+        userInfo.setOutFlow(valueOrZero(user.getOutFlow()));
+        userInfo.setDailyFlow(valueOrZero(user.getDailyFlow()));
+        userInfo.setDailyInFlow(valueOrZero(user.getDailyInFlow()));
+        userInfo.setDailyOutFlow(valueOrZero(user.getDailyOutFlow()));
+        userInfo.setNum(valueOrZero(user.getNum()));
         userInfo.setExpTime(user.getExpTime());
         userInfo.setFlowResetTime(user.getFlowResetTime());
         userInfo.setCreatedTime(user.getCreatedTime());
@@ -747,7 +747,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                         .last("LIMIT 24")
         );
 
-        List<StatisticsFlow> result = new ArrayList<>(recentFlows);
+        List<StatisticsFlow> result = new ArrayList<>(listOrEmpty(recentFlows));
 
         // 如果查出来的记录不足24条，需要补0和对应的时间
         if (result.size() < 24) {
@@ -777,6 +777,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         log.info("用户 {} 获取到 {} 条实际记录，补齐为 {} 条24小时记录", userId, recentFlows.size(), result.size());
         return result;
 
+    }
+
+    private Long valueOrZero(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private Integer valueOrZero(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private <T> List<T> listOrEmpty(List<T> value) {
+        return value == null ? new ArrayList<>() : value;
     }
 
     /**
