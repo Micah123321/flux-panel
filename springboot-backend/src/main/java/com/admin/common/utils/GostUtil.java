@@ -8,6 +8,7 @@ import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.StringUtils;
 import org.aspectj.apache.bcel.generic.RET;
 
+import java.util.List;
 import java.util.Objects;
 
 public class GostUtil {
@@ -57,6 +58,14 @@ public class GostUtil {
         JSONArray services = new JSONArray();
         services.add(name + "_tcp");
         services.add(name + "_udp");
+        data.put("services", services);
+        return WebSocketServer.send_msg(node_id, data, "DeleteService");
+    }
+
+    public static GostDto DeleteServices(Long node_id, List<String> serviceNames) {
+        JSONObject data = new JSONObject();
+        JSONArray services = new JSONArray();
+        services.addAll(serviceNames);
         data.put("services", services);
         return WebSocketServer.send_msg(node_id, data, "DeleteService");
     }
@@ -196,97 +205,79 @@ public class GostUtil {
     }
 
     public static GostDto AddChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
-        JSONObject dialer = new JSONObject();
-        dialer.put("type", protocol);
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
-            dialer.put("metadata", metadata);
-        }
+        return AddChains(node_id, name, remoteAddr, protocol, interfaceName, null);
+    }
 
-
-
-
-        JSONObject connector = new JSONObject();
-        connector.put("type", "relay");
-
-        JSONObject node = new JSONObject();
-        node.put("name", "node-" + name);
-        node.put("addr", remoteAddr);
-        node.put("connector", connector);
-        node.put("dialer", dialer);
-
-        if (StringUtils.isNotBlank(interfaceName)) {
-            node.put("interface", interfaceName);
-        }
-
-
-        JSONArray nodes = new JSONArray();
-        nodes.add(node);
-
-        JSONObject hop = new JSONObject();
-        hop.put("name", "hop-" + name);
-        hop.put("nodes", nodes);
-
-        JSONArray hops = new JSONArray();
-        hops.add(hop);
-
-        JSONObject data = new JSONObject();
-        data.put("name", name + "_chains");
-        data.put("hops", hops);
-
+    public static GostDto AddChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName, String strategy) {
+        JSONObject data = createChainConfig(name, remoteAddr, protocol, interfaceName, strategy);
         return WebSocketServer.send_msg(node_id, data, "AddChains");
     }
 
     public static GostDto UpdateChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
-        JSONObject dialer = new JSONObject();
-        dialer.put("type", protocol);
+        return UpdateChains(node_id, name, remoteAddr, protocol, interfaceName, null);
+    }
 
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
-            dialer.put("metadata", metadata);
-        }
-
-
-        JSONObject connector = new JSONObject();
-        connector.put("type", "relay");
-
-        JSONObject node = new JSONObject();
-        node.put("name", "node-" + name);
-        node.put("addr", remoteAddr);
-        node.put("connector", connector);
-        node.put("dialer", dialer);
-
-        if (StringUtils.isNotBlank(interfaceName)) {
-            node.put("interface", interfaceName);
-        }
-
-        JSONArray nodes = new JSONArray();
-        nodes.add(node);
-
-        JSONObject hop = new JSONObject();
-        hop.put("name", "hop-" + name);
-        hop.put("nodes", nodes);
-
-        JSONArray hops = new JSONArray();
-        hops.add(hop);
-
-        JSONObject data = new JSONObject();
-        data.put("name", name + "_chains");
-        data.put("hops", hops);
+    public static GostDto UpdateChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName, String strategy) {
+        JSONObject data = createChainConfig(name, remoteAddr, protocol, interfaceName, strategy);
         JSONObject req = new JSONObject();
         req.put("chain", name + "_chains");
         req.put("data", data);
-       return WebSocketServer.send_msg(node_id, req, "UpdateChains");
+        return WebSocketServer.send_msg(node_id, req, "UpdateChains");
     }
 
     public static GostDto DeleteChains(Long node_id, String name) {
         JSONObject data = new JSONObject();
         data.put("chain", name + "_chains");
         return WebSocketServer.send_msg(node_id, data, "DeleteChains");
+    }
+
+    private static JSONObject createChainConfig(String name, String remoteAddr, String protocol, String interfaceName, String strategy) {
+        JSONObject dialer = new JSONObject();
+        dialer.put("type", protocol);
+        if (Objects.equals(protocol, "quic")){
+            JSONObject metadata = new JSONObject();
+            metadata.put("keepAlive", true);
+            metadata.put("ttl", "10s");
+            dialer.put("metadata", metadata);
+        }
+
+        JSONObject connector = new JSONObject();
+        connector.put("type", "relay");
+        JSONArray nodes = new JSONArray();
+        String[] split = remoteAddr.split(",");
+        int num = 1;
+        for (String addr : split) {
+            if (StringUtils.isBlank(addr)) {
+                continue;
+            }
+            JSONObject node = new JSONObject();
+            node.put("name", "node-" + name + "-" + num);
+            node.put("addr", addr.trim());
+            node.put("connector", connector);
+            node.put("dialer", dialer);
+            if (StringUtils.isNotBlank(interfaceName)) {
+                node.put("interface", interfaceName);
+            }
+            nodes.add(node);
+            num ++;
+        }
+
+        JSONObject hop = new JSONObject();
+        hop.put("name", "hop-" + name);
+        hop.put("nodes", nodes);
+        JSONObject selector = new JSONObject();
+        selector.put("strategy", StringUtils.isBlank(strategy) ? "fifo" : strategy);
+        selector.put("maxFails", 1);
+        selector.put("failTimeout", "600s");
+        hop.put("selector", selector);
+
+        JSONArray hops = new JSONArray();
+        hops.add(hop);
+
+        JSONObject data = new JSONObject();
+        data.put("name", name + "_chains");
+        data.put("hops", hops);
+        return data;
     }
 
     private static JSONObject createLimiterData(Long name, String speed) {

@@ -5,10 +5,12 @@ import com.admin.common.lang.R;
 import com.admin.entity.AggregateForward;
 import com.admin.entity.AggregateNodeGroup;
 import com.admin.entity.Node;
+import com.admin.entity.Tunnel;
 import com.admin.mapper.AggregateForwardMapper;
 import com.admin.mapper.AggregateNodeGroupMapper;
 import com.admin.service.AggregateNodeGroupService;
 import com.admin.service.NodeService;
+import com.admin.service.TunnelService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
@@ -32,6 +34,9 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
 
     @Resource
     private AggregateForwardMapper aggregateForwardMapper;
+
+    @Resource
+    private TunnelService tunnelService;
 
     @Override
     public R createGroup(AggregateNodeGroupDto dto) {
@@ -70,8 +75,8 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         }
 
         String nextNodeIds = joinNodeIds(nodeIds);
-        if (!nextNodeIds.equals(group.getNodeIds()) && activeForwardReferenceCount(group.getId()) > 0) {
-            return R.err("节点组正在被运行中的聚合转发使用，请先暂停相关聚合转发");
+        if (!nextNodeIds.equals(group.getNodeIds()) && activeReferenceCount(group.getId()) > 0) {
+            return R.err("节点组正在被隧道或运行中的聚合转发使用，不能修改成员");
         }
 
         group.setName(dto.getName().trim());
@@ -87,10 +92,8 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         if (group == null) {
             return R.err("节点组不存在");
         }
-        Integer count = aggregateForwardMapper.selectCount(new QueryWrapper<AggregateForward>()
-                .eq("entry_group_id", id).or().eq("exit_group_id", id));
-        if (count != null && count > 0) {
-            return R.err("节点组正在被聚合转发使用，不能删除");
+        if (activeReferenceCount(id) > 0) {
+            return R.err("节点组正在被隧道或聚合转发使用，不能删除");
         }
         return removeById(id) ? R.ok("删除成功") : R.err("节点组删除失败");
     }
@@ -116,11 +119,13 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         return ids;
     }
 
-    private int activeForwardReferenceCount(Long groupId) {
-        Integer count = aggregateForwardMapper.selectCount(new QueryWrapper<AggregateForward>()
+    private long activeReferenceCount(Long groupId) {
+        Integer forwardCount = aggregateForwardMapper.selectCount(new QueryWrapper<AggregateForward>()
                 .eq("status", STATUS_ACTIVE)
                 .and(wrapper -> wrapper.eq("entry_group_id", groupId).or().eq("exit_group_id", groupId)));
-        return count == null ? 0 : count;
+        long tunnelCount = tunnelService.count(new QueryWrapper<Tunnel>()
+                .eq("in_group_id", groupId).or().eq("out_group_id", groupId));
+        return (forwardCount == null ? 0 : forwardCount) + tunnelCount;
     }
 
     private R validateNodes(List<Long> nodeIds) {

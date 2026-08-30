@@ -24,9 +24,14 @@ public class Tunnel extends BaseEntity {
     private String name;
 
     /**
-     * 入口节点ID
+     * 入口节点ID（单节点或节点组首个节点的兼容字段）
      */
     private Long inNodeId;
+
+    /**
+     * 入口节点组ID，为空表示单节点隧道
+     */
+    private Long inGroupId;
 
     /**
      * 入口IP (兼容字段)
@@ -34,9 +39,14 @@ public class Tunnel extends BaseEntity {
     private String inIp;
 
     /**
-     * 出口节点ID
+     * 出口节点ID（单节点或节点组首个节点的兼容字段）
      */
     private Long outNodeId;
+
+    /**
+     * 出口节点组ID，为空表示单节点出口
+     */
+    private Long outGroupId;
 
     /**
      * 出口IP (兼容字段)

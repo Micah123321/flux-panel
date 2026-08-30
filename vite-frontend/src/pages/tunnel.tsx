@@ -18,7 +18,8 @@ import {
   deleteTunnel,
   getNodeList,
   diagnoseTunnel,
-  getAdminSummary
+  getAdminSummary,
+  getAggregateNodeGroups
 } from "@/api";
 
 interface Tunnel {
@@ -27,6 +28,10 @@ interface Tunnel {
   type: number; // 1: 端口转发, 2: 隧道转发
   inNodeId: number;
   outNodeId?: number;
+  inGroupId?: number;
+  outGroupId?: number;
+  inGroupName?: string;
+  outGroupName?: string;
   inIp: string;
   outIp?: string;
   protocol?: string;
@@ -43,6 +48,17 @@ interface Node {
   id: number;
   name: string;
   status: number; // 1: 在线, 0: 离线
+  ip?: string;
+  serverIp?: string;
+  portSta?: number;
+  portEnd?: number;
+}
+
+interface AggregateNodeGroup {
+  id: number;
+  name: string;
+  nodeIds: number[];
+  nodes?: Node[];
 }
 
 interface TunnelStat {
@@ -59,6 +75,8 @@ interface TunnelForm {
   type: number;
   inNodeId: number | null;
   outNodeId?: number | null;
+  inGroupId?: number | null;
+  outGroupId?: number | null;
   protocol: string;
   tcpListenAddr: string;
   udpListenAddr: string;
@@ -89,6 +107,7 @@ export default function TunnelPage() {
   const [loading, setLoading] = useState(true);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [groups, setGroups] = useState<AggregateNodeGroup[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tunnelStats, setTunnelStats] = useState<TunnelStat[]>([]);
   
@@ -110,6 +129,8 @@ export default function TunnelPage() {
     type: 1,
     inNodeId: null,
     outNodeId: null,
+    inGroupId: null,
+    outGroupId: null,
     protocol: 'tls',
     tcpListenAddr: '[::]',
     udpListenAddr: '[::]',
@@ -131,9 +152,10 @@ export default function TunnelPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [tunnelsRes, nodesRes] = await Promise.all([
+      const [tunnelsRes, nodesRes, groupsRes] = await Promise.all([
         getTunnelList(),
-        getNodeList()
+        getNodeList(),
+        getAggregateNodeGroups()
       ]);
       
       if (tunnelsRes.code === 0) {
@@ -146,6 +168,16 @@ export default function TunnelPage() {
         setNodes(nodesRes.data || []);
       } else {
         console.warn('获取节点列表失败:', nodesRes.msg);
+      }
+
+      if (groupsRes.code === 0) {
+        setGroups((groupsRes.data || []).map((group: any) => ({
+          ...group,
+          nodeIds: Array.isArray(group.nodeIds) ? group.nodeIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id)) : [],
+          nodes: group.nodes || [],
+        })));
+      } else {
+        console.warn('获取节点组失败:', groupsRes.msg);
       }
 
       // 管理员加载隧道占用统计
@@ -167,6 +199,35 @@ export default function TunnelPage() {
     }
   };
 
+  const getGroup = (groupId?: number | null) => groupId ? groups.find(group => group.id === groupId) : undefined;
+
+  const getGroupNodeIds = (groupId?: number | null) => {
+    const group = getGroup(groupId);
+    if (!group) return [];
+    const ids = group.nodeIds?.length ? group.nodeIds : (group.nodes || []).map(node => node.id);
+    return ids.map(id => Number(id)).filter(id => Number.isFinite(id));
+  };
+
+  const selectedNodeIds = (nodeId?: number | null, groupId?: number | null) => groupId ? getGroupNodeIds(groupId) : (nodeId ? [nodeId] : []);
+
+  const hasSelectionOverlap = () => {
+    const inIds = new Set(selectedNodeIds(form.inNodeId, form.inGroupId));
+    return selectedNodeIds(form.outNodeId, form.outGroupId).some(id => inIds.has(id));
+  };
+
+  const selectionKey = (nodeId?: number | null, groupId?: number | null) => groupId ? `group:${groupId}` : (nodeId ? `node:${nodeId}` : null);
+
+  const applySelection = (field: 'in' | 'out', key?: string) => {
+    if (!key) return;
+    const [kind, rawId] = key.split(':');
+    const id = Number(rawId);
+    if (!Number.isFinite(id)) return;
+    setForm(prev => field === 'in'
+      ? { ...prev, inNodeId: kind === 'node' ? id : null, inGroupId: kind === 'group' ? id : null }
+      : { ...prev, outNodeId: kind === 'node' ? id : null, outGroupId: kind === 'group' ? id : null }
+    );
+  };
+
   // 表单验证
   const validateForm = (): boolean => {
     const newErrors: {[key: string]: string} = {};
@@ -177,8 +238,8 @@ export default function TunnelPage() {
       newErrors.name = '隧道名称长度应在2-50个字符之间';
     }
     
-    if (!form.inNodeId) {
-      newErrors.inNodeId = '请选择入口节点';
+    if (!form.inNodeId && !form.inGroupId) {
+      newErrors.inNodeId = '请选择入口节点或节点组';
     }
     
     if (!form.tcpListenAddr.trim()) {
@@ -193,12 +254,11 @@ export default function TunnelPage() {
       newErrors.trafficRatio = '流量倍率必须在0.0-100.0之间';
     }
     
-    // 隧道转发时的验证
     if (form.type === 2) {
-      if (!form.outNodeId) {
-        newErrors.outNodeId = '请选择出口节点';
-      } else if (form.inNodeId === form.outNodeId) {
-        newErrors.outNodeId = '隧道转发模式下，入口和出口不能是同一个节点';
+      if (!form.outNodeId && !form.outGroupId) {
+        newErrors.outNodeId = '请选择出口节点或节点组';
+      } else if (hasSelectionOverlap()) {
+        newErrors.outNodeId = '隧道转发模式下，入口和出口不能包含相同节点';
       }
       
       if (!form.protocol) {
@@ -218,6 +278,8 @@ export default function TunnelPage() {
       type: 1,
       inNodeId: null,
       outNodeId: null,
+      inGroupId: null,
+      outGroupId: null,
       protocol: 'tls',
       tcpListenAddr: '[::]',
       udpListenAddr: '[::]',
@@ -237,8 +299,10 @@ export default function TunnelPage() {
       id: tunnel.id,
       name: tunnel.name,
       type: tunnel.type,
-      inNodeId: tunnel.inNodeId,
-      outNodeId: tunnel.outNodeId || null,
+      inNodeId: tunnel.inGroupId ? null : tunnel.inNodeId,
+      outNodeId: tunnel.outGroupId ? null : (tunnel.outNodeId || null),
+      inGroupId: tunnel.inGroupId || null,
+      outGroupId: tunnel.outGroupId || null,
       protocol: tunnel.protocol || 'tls',
       tcpListenAddr: tunnel.tcpListenAddr || '[::]',
       udpListenAddr: tunnel.udpListenAddr || '[::]',
@@ -285,6 +349,7 @@ export default function TunnelPage() {
       ...prev,
       type,
       outNodeId: type === 1 ? null : prev.outNodeId,
+      outGroupId: type === 1 ? null : prev.outGroupId,
       protocol: type === 1 ? 'tls' : prev.protocol
     }));
   };
@@ -295,7 +360,13 @@ export default function TunnelPage() {
     
     setSubmitLoading(true);
     try {
-      const data = { ...form };
+      const data = {
+        ...form,
+        inNodeId: form.inGroupId ? null : form.inNodeId,
+        outNodeId: form.type === 1 || form.outGroupId ? null : form.outNodeId,
+        inGroupId: form.inGroupId || null,
+        outGroupId: form.type === 1 ? null : (form.outGroupId || null),
+      };
       
       const response = isEdit 
         ? await updateTunnel(data)
@@ -383,6 +454,13 @@ export default function TunnelPage() {
     if (!nodeId) return '-';
     const node = nodes.find(n => n.id === nodeId);
     return node ? node.name : `节点${nodeId}`;
+  };
+
+  const getEntryName = (tunnel: Tunnel): string => tunnel.inGroupId ? (tunnel.inGroupName || getGroup(tunnel.inGroupId)?.name || `节点组${tunnel.inGroupId}`) : getNodeName(tunnel.inNodeId);
+
+  const getExitName = (tunnel: Tunnel): string => {
+    if (tunnel.type === 1) return getEntryName(tunnel);
+    return tunnel.outGroupId ? (tunnel.outGroupName || getGroup(tunnel.outGroupId)?.name || `节点组${tunnel.outGroupId}`) : getNodeName(tunnel.outNodeId);
   };
 
   // 获取状态显示
@@ -528,10 +606,10 @@ export default function TunnelPage() {
                       <div className="space-y-1.5">
                         <div className="p-2 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-default-600">入口节点</span>
+                            <span className="text-xs font-medium text-default-600">{tunnel.inGroupId ? '入口节点组' : '入口节点'}</span>
                           </div>
                           <code className="text-xs font-mono text-foreground block truncate">
-                            {getNodeName(tunnel.inNodeId)}
+                            {getEntryName(tunnel)}
                           </code>
                           <code className="text-xs font-mono text-default-500 block truncate">
                             {getDisplayIp(tunnel.inIp)}
@@ -547,11 +625,11 @@ export default function TunnelPage() {
                         <div className="p-2 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-xs font-medium text-default-600">
-                              {tunnel.type === 1 ? '出口节点（同入口）' : '出口节点'}
+                              {tunnel.type === 1 ? (tunnel.inGroupId ? '出口节点组（同入口）' : '出口节点（同入口）') : (tunnel.outGroupId ? '出口节点组' : '出口节点')}
                             </span>
                           </div>
                           <code className="text-xs font-mono text-foreground block truncate">
-                            {tunnel.type === 1 ? getNodeName(tunnel.inNodeId) : getNodeName(tunnel.outNodeId)}
+                            {getExitName(tunnel)}
                           </code>
                           <code className="text-xs font-mono text-default-500 block truncate">
                             {tunnel.type === 1 ? getDisplayIp(tunnel.inIp) : getDisplayIp(tunnel.outIp)}
@@ -738,37 +816,35 @@ export default function TunnelPage() {
                     <h3 className="text-lg font-semibold">入口配置</h3>
 
                     <Select
-                      label="入口节点"
-                      placeholder="请选择入口节点"
-                      selectedKeys={form.inNodeId ? [form.inNodeId.toString()] : []}
-                      onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
-                        if (selectedKey) {
-                          setForm(prev => ({ ...prev, inNodeId: parseInt(selectedKey) }));
-                        }
-                      }}
+                      label="入口节点或节点组"
+                      placeholder="请选择入口节点或节点组"
+                      selectedKeys={selectionKey(form.inNodeId, form.inGroupId) ? [selectionKey(form.inNodeId, form.inGroupId) as string] : []}
+                      onSelectionChange={(keys) => applySelection('in', Array.from(keys)[0] as string | undefined)}
                       isInvalid={!!errors.inNodeId}
                       errorMessage={errors.inNodeId}
                       variant="bordered"
                       isDisabled={isEdit}
                     >
-                      {nodes.map((node) => (
-                        <SelectItem 
-                          key={node.id}
-                          textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>{node.name}</span>
-                            <Chip 
-                              color={node.status === 1 ? 'success' : 'danger'} 
-                              variant="flat" 
-                              size="sm"
-                            >
-                              {node.status === 1 ? '在线' : '离线'}
-                            </Chip>
-                          </div>
-                        </SelectItem>
-                      ))}
+                      {[
+                        ...groups.map((group) => (
+                          <SelectItem key={`group:${group.id}`} textValue={`${group.name} (节点组)`}>
+                            <div className="flex items-center justify-between gap-3">
+                              <span>{group.name}</span>
+                              <Chip color="secondary" variant="flat" size="sm">{getGroupNodeIds(group.id).length} 节点</Chip>
+                            </div>
+                          </SelectItem>
+                        )),
+                        ...nodes.map((node) => (
+                          <SelectItem key={`node:${node.id}`} textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}>
+                            <div className="flex items-center justify-between">
+                              <span>{node.name}</span>
+                              <Chip color={node.status === 1 ? 'success' : 'danger'} variant="flat" size="sm">
+                                {node.status === 1 ? '在线' : '离线'}
+                              </Chip>
+                            </div>
+                          </SelectItem>
+                        ))
+                      ]}
                     </Select>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -845,44 +921,47 @@ export default function TunnelPage() {
                         </Select>
 
                         <Select
-                          label="出口节点"
-                          placeholder="请选择出口节点"
-                          selectedKeys={form.outNodeId ? [form.outNodeId.toString()] : []}
-                          onSelectionChange={(keys) => {
-                            const selectedKey = Array.from(keys)[0] as string;
-                            if (selectedKey) {
-                              setForm(prev => ({ ...prev, outNodeId: parseInt(selectedKey) }));
-                            }
-                          }}
+                          label="出口节点或节点组"
+                          placeholder="请选择出口节点或节点组"
+                          selectedKeys={selectionKey(form.outNodeId, form.outGroupId) ? [selectionKey(form.outNodeId, form.outGroupId) as string] : []}
+                          onSelectionChange={(keys) => applySelection('out', Array.from(keys)[0] as string | undefined)}
                           isInvalid={!!errors.outNodeId}
                           errorMessage={errors.outNodeId}
                           variant="bordered"
                           isDisabled={isEdit}
                         >
-                          {nodes.map((node) => (
-                            <SelectItem 
-                              key={node.id}
-                              textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span>{node.name}</span>
-                                <div className="flex items-center gap-2">
-                                  <Chip 
-                                    color={node.status === 1 ? 'success' : 'danger'} 
-                                    variant="flat" 
-                                    size="sm"
-                                  >
-                                    {node.status === 1 ? '在线' : '离线'}
-                                  </Chip>
-                                  {form.inNodeId === node.id && (
-                                    <Chip color="warning" variant="flat" size="sm">
-                                      已选为入口
+                          {[
+                            ...groups.map((group) => {
+                              const ids = getGroupNodeIds(group.id);
+                              const overlap = ids.some(id => selectedNodeIds(form.inNodeId, form.inGroupId).includes(id));
+                              return (
+                                <SelectItem key={`group:${group.id}`} textValue={`${group.name} (节点组)`}>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span>{group.name}</span>
+                                    <div className="flex items-center gap-2">
+                                      <Chip color="secondary" variant="flat" size="sm">{ids.length} 节点</Chip>
+                                      {overlap && <Chip color="warning" variant="flat" size="sm">含入口</Chip>}
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              );
+                            }),
+                            ...nodes.map((node) => (
+                              <SelectItem key={`node:${node.id}`} textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}>
+                                <div className="flex items-center justify-between">
+                                  <span>{node.name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <Chip color={node.status === 1 ? 'success' : 'danger'} variant="flat" size="sm">
+                                      {node.status === 1 ? '在线' : '离线'}
                                     </Chip>
-                                  )}
+                                    {selectedNodeIds(form.inNodeId, form.inGroupId).includes(node.id) && (
+                                      <Chip color="warning" variant="flat" size="sm">已选为入口</Chip>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            </SelectItem>
-                          ))}
+                              </SelectItem>
+                            ))
+                          ]}
                         </Select>
                       </>
                     )}

@@ -13,6 +13,14 @@ public class TunnelListDto {
      * 入口IP
      */
     private String ip;
+
+    private Long inGroupId;
+
+    private Long outGroupId;
+
+    private String inGroupName;
+
+    private String outGroupName;
     
     /**
      * 入口节点端口起始范围

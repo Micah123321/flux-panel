@@ -42,8 +42,10 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
     private static final String MODE_LOAD_BALANCE = "load_balance";
     private static final String MODE_FAILOVER = "failover";
     private static final String GOST_SUCCESS_MSG = "OK";
-    // ha-min: 默认节点范围 50000-60000 是 10001 个端口；超过该上限应改为后台批处理与进度回滚。
-    private static final int MAX_PORT_SPAN = 10001;
+    private static final String DEPRECATED_FORWARD_MSG = "聚合转发规则已下线，请在隧道管理中选择节点组创建隧道，再新增普通转发规则";
+    // ha-min: 独立聚合转发规则会按端口铺设服务，仅保留小范围历史兼容；新业务应走隧道管理。
+    private static final int MAX_PORT_SPAN = 200;
+    private static final int DELETE_BATCH_SIZE = 2048;
 
     @Resource
     private AggregateNodeGroupService aggregateNodeGroupService;
@@ -59,88 +61,12 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
 
     @Override
     public R createForward(AggregateForwardDto dto) {
-        ValidationContext context = validate(dto);
-        if (context.isHasError()) {
-            return R.err(context.getErrorMessage());
-        }
-
-        AggregateForward forward = buildForward(dto, new AggregateForward());
-        long now = System.currentTimeMillis();
-        forward.setCreatedTime(now);
-        forward.setUpdatedTime(now);
-        forward.setStatus(STATUS_ACTIVE);
-        forward.setInFlow(0L);
-        forward.setOutFlow(0L);
-        if (!save(forward)) {
-            return R.err("聚合转发创建失败");
-        }
-
-        R deployResult = deployForward(forward, context);
-        if (deployResult.getCode() != 0) {
-            R cleanupResult = deleteForwardServices(forward, context);
-            forward.setStatus(STATUS_PAUSED);
-            updateById(forward);
-            if (cleanupResult.getCode() != 0) {
-                return R.err(deployResult.getMsg() + "；清理失败，已保留暂停记录: " + cleanupResult.getMsg());
-            }
-            if (!removeById(forward.getId())) {
-                return R.err(deployResult.getMsg() + "；服务已清理，但临时记录删除失败，已置为暂停");
-            }
-            return deployResult;
-        }
-        return R.ok(enrichForward(forward));
+        return R.err(DEPRECATED_FORWARD_MSG);
     }
 
     @Override
     public R updateForward(AggregateForwardDto dto) {
-        if (dto.getId() == null) {
-            return R.err("聚合转发ID不能为空");
-        }
-        AggregateForward existing = getById(dto.getId());
-        if (existing == null) {
-            return R.err("聚合转发不存在");
-        }
-        ValidationContext context = validate(dto);
-        if (context.isHasError()) {
-            return R.err(context.getErrorMessage());
-        }
-
-        AggregateForward oldState = copyForward(existing);
-        ValidationContext oldContext = resolveServiceContext(oldState);
-        if (oldState.getStatus() == STATUS_ACTIVE && oldContext.isHasError()) {
-            return R.err("无法清理原聚合转发服务: " + oldContext.getErrorMessage());
-        }
-        R deleteOldResult = oldState.getStatus() == STATUS_ACTIVE ? deleteForwardServices(oldState, oldContext) : R.ok();
-        if (deleteOldResult.getCode() != 0) {
-            return deleteOldResult;
-        }
-
-        AggregateForward updated = buildForward(dto, existing);
-        updated.setUpdatedTime(System.currentTimeMillis());
-        if (!updateById(updated)) {
-            R restoreResult = restoreOldServices(oldState, oldContext);
-            if (restoreResult.getCode() != 0) {
-                return R.err("聚合转发更新失败，旧服务恢复失败: " + restoreResult.getMsg());
-            }
-            return R.err("聚合转发更新失败");
-        }
-
-        R deployResult = updated.getStatus() == STATUS_ACTIVE ? deployForward(updated, context) : R.ok();
-        if (deployResult.getCode() != 0) {
-            R cleanupResult = deleteForwardServices(updated, context);
-            if (cleanupResult.getCode() != 0) {
-                return R.err(deployResult.getMsg() + "；新服务清理失败: " + cleanupResult.getMsg());
-            }
-            if (!updateById(oldState)) {
-                return R.err(deployResult.getMsg() + "；数据库回滚失败，旧服务未恢复");
-            }
-            R restoreResult = restoreOldServices(oldState, oldContext);
-            if (restoreResult.getCode() != 0) {
-                return R.err(deployResult.getMsg() + "；旧服务恢复失败: " + restoreResult.getMsg());
-            }
-            return deployResult;
-        }
-        return R.ok(enrichForward(updated));
+        return R.err(DEPRECATED_FORWARD_MSG);
     }
 
     @Override
@@ -211,32 +137,7 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
 
     @Override
     public R resumeForward(Long id) {
-        AggregateForward forward = getById(id);
-        if (forward == null) {
-            return R.err("聚合转发不存在");
-        }
-        if (forward.getStatus() == STATUS_ACTIVE) {
-            return R.ok("已恢复");
-        }
-        ValidationContext context = validateEntity(forward);
-        if (context.isHasError()) {
-            return R.err(context.getErrorMessage());
-        }
-        R deployResult = deployForward(forward, context);
-        if (deployResult.getCode() != 0) {
-            deleteForwardServices(forward, context);
-            return deployResult;
-        }
-        forward.setStatus(STATUS_ACTIVE);
-        forward.setUpdatedTime(System.currentTimeMillis());
-        if (!updateById(forward)) {
-            R cleanupResult = deleteForwardServices(forward, context);
-            if (cleanupResult.getCode() != 0) {
-                return R.err("恢复失败，已创建服务清理失败: " + cleanupResult.getMsg());
-            }
-            return R.err("恢复失败");
-        }
-        return R.ok("已恢复");
+        return R.err(DEPRECATED_FORWARD_MSG);
     }
 
     private AggregateForward buildForward(AggregateForwardDto dto, AggregateForward forward) {
@@ -448,16 +349,74 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
         if (context.isHasError()) {
             return R.err(context.getErrorMessage());
         }
-        for (int entryPort = forward.getEntryPortStart(); entryPort <= forward.getEntryPortEnd(); entryPort++) {
-            String serviceName = buildServiceName(forward.getId(), entryPort);
-            for (Node entryNode : context.getEntryNodes()) {
-                GostDto result = GostUtil.DeleteService(entryNode.getId(), serviceName);
-                if (!GOST_SUCCESS_MSG.equals(result.getMsg()) && (result.getMsg() == null || !result.getMsg().contains("not found"))) {
-                    return R.err("入口节点 " + entryNode.getName() + " 删除服务失败: " + result.getMsg());
-                }
+        List<String> serviceNames = buildServiceNames(forward);
+        for (Node entryNode : context.getEntryNodes()) {
+            R result = deleteServiceNames(entryNode, serviceNames);
+            if (result.getCode() != 0) {
+                return result;
             }
         }
         return R.ok();
+    }
+
+    private List<String> buildServiceNames(AggregateForward forward) {
+        List<String> serviceNames = new ArrayList<>();
+        for (int entryPort = forward.getEntryPortStart(); entryPort <= forward.getEntryPortEnd(); entryPort++) {
+            String serviceName = buildServiceName(forward.getId(), entryPort);
+            serviceNames.add(serviceName + "_tcp");
+            serviceNames.add(serviceName + "_udp");
+        }
+        return serviceNames;
+    }
+
+    private R deleteServiceNames(Node entryNode, List<String> serviceNames) {
+        for (int i = 0; i < serviceNames.size(); i += DELETE_BATCH_SIZE) {
+            int end = Math.min(i + DELETE_BATCH_SIZE, serviceNames.size());
+            R result = deleteServiceNameBatch(entryNode, serviceNames.subList(i, end));
+            if (result.getCode() != 0) {
+                return result;
+            }
+        }
+        return R.ok();
+    }
+
+    private R deleteServiceNameBatch(Node entryNode, List<String> serviceNames) {
+        GostDto result = GostUtil.DeleteServices(entryNode.getId(), serviceNames);
+        if (GOST_SUCCESS_MSG.equals(result.getMsg())) {
+            return R.ok();
+        }
+        if (!isGostNotFound(result)) {
+            return R.err("入口节点 " + entryNode.getName() + " 删除服务失败: " + result.getMsg());
+        }
+        if (serviceNames.size() == 1) {
+            return R.ok();
+        }
+
+        GostDto first = GostUtil.DeleteServices(entryNode.getId(), serviceNames.subList(0, 1));
+        GostDto last = GostUtil.DeleteServices(entryNode.getId(), serviceNames.subList(serviceNames.size() - 1, serviceNames.size()));
+        boolean firstMissing = isGostNotFound(first);
+        boolean lastMissing = isGostNotFound(last);
+        if (!GOST_SUCCESS_MSG.equals(first.getMsg()) && !firstMissing) {
+            return R.err("入口节点 " + entryNode.getName() + " 删除服务失败: " + first.getMsg());
+        }
+        if (!GOST_SUCCESS_MSG.equals(last.getMsg()) && !lastMissing) {
+            return R.err("入口节点 " + entryNode.getName() + " 删除服务失败: " + last.getMsg());
+        }
+        // ha-min: 历史聚合服务按端口顺序创建/删除；首尾都不存在时认为这一段已经清空。
+        if (firstMissing && lastMissing) {
+            return R.ok();
+        }
+
+        int mid = serviceNames.size() / 2;
+        R left = deleteServiceNameBatch(entryNode, serviceNames.subList(0, mid));
+        if (left.getCode() != 0) {
+            return left;
+        }
+        return deleteServiceNameBatch(entryNode, serviceNames.subList(mid, serviceNames.size()));
+    }
+
+    private boolean isGostNotFound(GostDto result) {
+        return result.getMsg() != null && result.getMsg().contains("not found");
     }
 
     private void deleteCreatedServices(List<ServiceRef> created) {
@@ -532,6 +491,9 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
         List<String> result = new ArrayList<>();
         for (String address : splitAddresses(forward.getEntryAddresses())) {
             for (int port = forward.getEntryPortStart(); port <= forward.getEntryPortEnd(); port++) {
+                if (result.size() >= 20) {
+                    return result;
+                }
                 result.add(formatHostPort(address, port));
             }
         }

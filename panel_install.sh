@@ -967,6 +967,41 @@ UPDATE \`tunnel\`
 SET \`traffic_ratio\` = 1.0
 WHERE \`traffic_ratio\` IS NULL;
 
+-- tunnel 表：添加节点组关联字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'tunnel'
+        AND column_name = 'in_group_id'
+    ),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`in_group_id\` INT(10) DEFAULT NULL AFTER \`in_node_id\`;',
+    'SELECT "Column \`in_group_id\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'tunnel'
+        AND column_name = 'out_group_id'
+    ),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`out_group_id\` INT(10) DEFAULT NULL AFTER \`out_node_id\`;',
+    'SELECT "Column \`out_group_id\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- forward 表：删除 proxy_protocol 字段（如果存在）
 SET @sql = (
   SELECT IF(

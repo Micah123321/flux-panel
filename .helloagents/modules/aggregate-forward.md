@@ -1,19 +1,26 @@
-# 聚合转发
+# 聚合转发与节点组
 
 ## 范围
 
-- 前端入口：`vite-frontend/src/pages/aggregate-forward.tsx` 的 `/aggregate-forward` 页面。
-- 后端入口：`springboot-backend/src/main/java/com/admin/service/impl/AggregateForwardServiceImpl.java`。
-- 聚合转发以入口节点组监听端口范围为基础，为每个入口节点、每个入口端口创建 GOST 服务，并按入口端口偏移映射到出口端口范围。
+- 前端入口：`vite-frontend/src/pages/aggregate-forward.tsx` 的 `/aggregate-forward` 页面只负责节点组管理。
+- 后端节点组入口：`AggregateNodeGroupServiceImpl`。节点组是隧道管理可复用的入口/出口资源。
+- legacy 聚合转发入口：`AggregateForwardServiceImpl`。独立聚合转发规则已下线，create/update/resume 返回下线提示；delete 仅保留用于清理历史数据。
 
-## 端口推荐
+## 当前模型
 
-- 新增聚合转发时默认选择入口/出口节点组，并从两组成员节点的公共端口范围计算推荐范围。
-- 推荐范围长度取入口公共范围、出口公共范围与 `MAX_PORT_SPAN` 的最小值；入口和出口端口数量始终一致。
-- 推荐按钮展示 `起始-结束 · N 个`，点击后自动填入入口/出口四个端口字段。
-- 当前 `MAX_PORT_SPAN = 10001`，用于覆盖默认节点端口段 `50000-60000`。超过该量级仍应改造为后台批处理、进度展示与失败回滚。
+- 在节点组页面创建节点组；每组返回成员节点、在线状态和 `portSta`/`portEnd`，前端展示共同可用端口范围。
+- 在隧道管理新增隧道时，入口和隧道转发出口都可以选择单节点或节点组；`Tunnel`/`TunnelDto` 使用 `inGroupId`、`outGroupId` 保存组引用，`inNodeId`、`outNodeId` 保留为首个节点兼容字段。
+- 普通转发仍是一条业务规则。`ForwardServiceImpl` 根据隧道的节点组展开 GOST 下发：入口组每个节点创建主服务；隧道转发出口组每个节点创建远端服务；入口 chain 指向出口组所有节点地址并使用转发策略选择。
+- 端口分配按组内所有成员的公共端口范围找共同空闲端口，避免只检查首个节点导致组内冲突。
+- 节点组被隧道或运行中的历史聚合转发引用时不能删除或修改成员。
+
+## 历史数据清理
+
+- 历史 `aggregate_forward` 记录可能已经铺设大量 `agf_<id>_<port>_{tcp,udp}` 服务。删除接口使用 `GostUtil.DeleteServices` 批量删除服务名，并对 `not found` 做二分收敛，避免按端口串行等待。
+- 清理顺序：先用后端 legacy delete 清理 GOST 服务，再删除 DB 记录；不要先手动删 DB 行。
 
 ## 验证
 
 - 静态自检：`node tests/aggregate_forward_ui_check.mjs`。
 - 前端构建：在 `vite-frontend` 执行 `npm run build`。
+- 本机没有 Maven/Maven Wrapper 时，后端编译依赖 CI 或远程镜像构建验证。

@@ -45,6 +45,10 @@ public class CheckGostConfigAsync {
     @Lazy
     private UserTunnelService userTunnelService;
 
+    @Resource
+    @Lazy
+    private AggregateNodeGroupService aggregateNodeGroupService;
+
 
 
     /**
@@ -165,8 +169,8 @@ public class CheckGostConfigAsync {
      * 对比节点上报的限流器与数据库 speed_limit 记录，补建节点上缺失的限流器
      */
     public void syncLimiters(GostConfigDto gostConfig, Node node) {
-        List<Tunnel> tunnelList = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", node.getId()));
-        if (tunnelList == null || tunnelList.isEmpty()) return;
+        List<Tunnel> tunnelList = getTunnelsForNode(node.getId());
+        if (tunnelList.isEmpty()) return;
         safeExecute(() -> {
             StringBuilder tunnelIds = new StringBuilder();
             for (Tunnel tunnel : tunnelList) {
@@ -215,8 +219,8 @@ public class CheckGostConfigAsync {
      * ha-min: 单节点逐条串行下发，转发数量极大时耗时较长；依赖 10 分钟配置上报周期，实时性有限。
      */
     private void syncMissingServices(GostConfigDto gostConfig, Node node) {
-        List<Tunnel> tunnelList = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", node.getId()));
-        if (tunnelList == null || tunnelList.isEmpty()) return;
+        List<Tunnel> tunnelList = getTunnelsForNode(node.getId());
+        if (tunnelList.isEmpty()) return;
         safeExecute(() -> {
             Set<String> existingServices = new HashSet<>();
             if (gostConfig.getServices() != null) {
@@ -245,6 +249,29 @@ public class CheckGostConfigAsync {
                 }
             }
         }, "同步缺失服务 ");
+    }
+
+    private List<Tunnel> getTunnelsForNode(Long nodeId) {
+        List<Tunnel> result = new ArrayList<>();
+        List<Tunnel> tunnels = tunnelService.list();
+        if (tunnels == null) {
+            return result;
+        }
+        for (Tunnel tunnel : tunnels) {
+            if (tunnelContainsNode(tunnel.getInGroupId(), tunnel.getInNodeId(), nodeId) ||
+                    (tunnel.getType() != null && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && tunnelContainsNode(tunnel.getOutGroupId(), tunnel.getOutNodeId(), nodeId))) {
+                result.add(tunnel);
+            }
+        }
+        return result;
+    }
+
+    private boolean tunnelContainsNode(Long groupId, Long nodeId, Long targetNodeId) {
+        if (groupId != null) {
+            AggregateNodeGroup group = aggregateNodeGroupService.getById(groupId);
+            return group != null && aggregateNodeGroupService.parseNodeIds(group).contains(targetNodeId);
+        }
+        return Objects.equals(nodeId, targetNodeId);
     }
 
     /**
