@@ -37,6 +37,10 @@ assert.match(aggregateService, /return R\.err\(DEPRECATED_FORWARD_MSG\);/, '聚�
 assert.doesNotMatch(aggregateService, /MAX_PORT_SPAN = 10001/, '后端仍允许 10001 端口聚合规则');
 assert.match(aggregateService, /DeleteServices/, 'legacy 聚合转发删除未使用批量删除');
 
+const syncTask = read('springboot-backend/src/main/java/com/admin/common/task/CheckGostConfigAsync.java');
+assert.match(syncTask, /isLegacyAggregateService/, '配置上报清理未识别 agf_ 历史服务');
+assert.match(syncTask, /cleanLegacyAggregateService/, '配置上报清理未删除 agf_ 孤立服务');
+
 assert.match(forwardService, /resolveTunnelNodes\(tunnel\.getInGroupId\(\), tunnel\.getInNodeId\(\)\)/, '普通转发入口未展开节点组');
 assert.match(forwardService, /resolveTunnelNodes\(tunnel\.getOutGroupId\(\), tunnel\.getOutNodeId\(\)\)/, '普通转发出口未展开节点组');
 assert.match(forwardService, /buildNodeRemoteAddr\(nodeInfo\.getOutNodes\(\), forward\.getOutPort\(\)\)/, '隧道转发 chain 未使用出口节点组');

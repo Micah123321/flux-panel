@@ -49,6 +49,10 @@ public class CheckGostConfigAsync {
     @Lazy
     private AggregateNodeGroupService aggregateNodeGroupService;
 
+    @Resource
+    @Lazy
+    private AggregateForwardService aggregateForwardService;
+
 
 
     /**
@@ -81,6 +85,10 @@ public class CheckGostConfigAsync {
 
                 if (!Objects.equals(service.getName(), "web_api")){
                     String[] serviceIds = parseServiceName(service.getName());
+                    if (isLegacyAggregateService(serviceIds)) {
+                        cleanLegacyAggregateService(serviceIds, node, service.getName());
+                        return;
+                    }
                     if (serviceIds.length == 4) {
                         String forwardId = serviceIds[0];
                         String userId = serviceIds[1];
@@ -112,6 +120,23 @@ public class CheckGostConfigAsync {
             }, "清理服务 " + service.getName());
         }
 
+    }
+
+    private boolean isLegacyAggregateService(String[] serviceIds) {
+        return serviceIds.length == 4 && Objects.equals(serviceIds[0], "agf");
+    }
+
+    private void cleanLegacyAggregateService(String[] serviceIds, Node node, String serviceName) {
+        String type = serviceIds[3];
+        if (!Objects.equals(type, "tcp")) {
+            return;
+        }
+        AggregateForward aggregateForward = aggregateForwardService.getById(serviceIds[1]);
+        if (aggregateForward == null) {
+            String baseName = serviceIds[0] + "_" + serviceIds[1] + "_" + serviceIds[2];
+            log.info("删除孤立的历史聚合转发服务: {} (节点: {})", serviceName, node.getId());
+            GostUtil.DeleteService(node.getId(), baseName);
+        }
     }
 
     /**
