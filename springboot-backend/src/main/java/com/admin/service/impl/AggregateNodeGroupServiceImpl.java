@@ -13,6 +13,7 @@ import com.admin.service.NodeService;
 import com.admin.service.TunnelService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -36,6 +37,7 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
     private AggregateForwardMapper aggregateForwardMapper;
 
     @Resource
+    @Lazy
     private TunnelService tunnelService;
 
     @Override
