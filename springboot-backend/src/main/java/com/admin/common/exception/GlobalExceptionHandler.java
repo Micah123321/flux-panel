@@ -34,8 +34,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(value = Exception.class)
     public R Exception(Exception e){
-        log.info("异常：----------------{}", e.getMessage());
-        return R.err(-2, e.getMessage());
+        log.error("异常：----------------", e);
+        String message = e.getMessage();
+        if (isMissingDatabaseColumn(message)) {
+            return R.err(-2, "数据库结构不完整，请执行面板更新后重试");
+        }
+        return R.err(-2, message == null ? "请求失败" : message);
+    }
+
+    private boolean isMissingDatabaseColumn(String message) {
+        return message != null && message.contains("Unknown column");
     }
 
 }

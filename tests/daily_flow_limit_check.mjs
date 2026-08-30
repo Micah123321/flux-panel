@@ -6,6 +6,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 // 每日流量限制全链路静态断言：套餐设置 -> 用户生效 -> 网关执行 -> 每日重置
 
 const schema = read('gost.sql');
+const installer = read('panel_install.sh');
 const packagePlan = read('springboot-backend/src/main/java/com/admin/entity/PackagePlan.java');
 const userEntity = read('springboot-backend/src/main/java/com/admin/entity/User.java');
 const userTunnelEntity = read('springboot-backend/src/main/java/com/admin/entity/UserTunnel.java');
@@ -14,6 +15,7 @@ const commerceService = read('springboot-backend/src/main/java/com/admin/service
 const userService = read('springboot-backend/src/main/java/com/admin/service/impl/UserServiceImpl.java');
 const flowController = read('springboot-backend/src/main/java/com/admin/controller/FlowController.java');
 const resetTask = read('springboot-backend/src/main/java/com/admin/common/task/ResetFlowAsync.java');
+const exceptionHandler = read('springboot-backend/src/main/java/com/admin/common/exception/GlobalExceptionHandler.java');
 const planTypes = read('vite-frontend/src/types/index.ts');
 const adminPlanSection = read('vite-frontend/src/pages/commerce-admin/PlanSection.tsx');
 const commercePage = read('vite-frontend/src/pages/commerce.tsx');
@@ -22,6 +24,8 @@ const dashboard = read('vite-frontend/src/pages/dashboard.tsx');
 // 1. 数据库层：package_plan / user / user_tunnel 三表均有日限与日计数字段
 assert.match(schema, /CREATE TABLE[\s\S]*?`package_plan`[\s\S]*?`daily_flow`/, 'package_plan 缺少 daily_flow');
 assert.equal(schema.match(/`daily_flow` bigint\(20\) NOT NULL DEFAULT '0'/g)?.length, 3, 'daily_flow 应出现在 package_plan/user/user_tunnel 三处');
+assert.match(installer, /CREATE TABLE IF NOT EXISTS \\`package_plan\\`[\s\S]*?\\`daily_flow\\`/, 'panel_install.sh package_plan 缺少 daily_flow');
+assert.match(installer, /ALTER TABLE \\`package_plan\\` ADD COLUMN \\`daily_flow\\`/, 'panel_install.sh 缺少 daily_flow 老库补列迁移');
 assert.equal(schema.match(/`daily_in_flow`/g)?.length, 2, 'daily_in_flow 应出现在 user/user_tunnel 两处');
 assert.equal(schema.match(/`daily_out_flow`/g)?.length, 2, 'daily_out_flow 应出现在 user/user_tunnel 两处');
 
@@ -62,6 +66,7 @@ assert.match(planTypes, /dailyFlow: number;/, 'PackagePlan 类型缺少 dailyFlo
 assert.match(adminPlanSection, /每日流量限制（GiB，0为不限制）/, '管理表单缺少每日流量输入');
 assert.match(commercePage, /日限 \$\{plan\.dailyFlow\} GiB|不限日流量/, '购买页缺少日限展示');
 assert.match(dashboard, /今日流量/, '用户侧缺少今日流量展示');
+assert.match(exceptionHandler, /数据库结构不完整，请执行面板更新后重试/, '缺列异常缺少短提示');
 
 console.log('daily-flow-limit check: all assertions passed');
 

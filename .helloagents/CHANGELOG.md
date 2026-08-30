@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- 修复管理员添加套餐时 `Unknown column 'daily_flow'`：`panel_install.sh` 的 `package_plan` 建表补齐 `daily_flow`，并新增老库幂等补列迁移；后端缺列异常改为短提示并保留完整日志；管理员套餐表单改用 HeroUI Select 展示套餐类型/售卖状态/可见性/用户组，基础信息与权益限制分组展示，套餐卡片显示类型和公开/隐藏状态。自检：`node tests/daily_flow_limit_check.mjs`、`node tests/commerce_feature_check.mjs`、`npm run build`、`bash -n panel_install.sh` 通过；本机无 `mvn`/Maven Wrapper，未执行后端编译。
 - 修复 dashboard 无套餐/空套餐数据时误报 `获取套餐信息失败`：前端新增 `normalizePackageInfo` 空态规范化，`/user/package` 成功但 data/userInfo 为空时展示 0 配额/空隧道/空转发，不再因 `data.userInfo` 为空触发 catch；后端 `/user/package` DTO 对可空数字和列表统一做 0/空数组兜底。新手引导卡片改为点击关闭才写入 `guide_checklist_closed_admin|user`，并清理旧版自动写入的 `guide_checklist_seen_admin|user`，刷新页面不会自动消失。自检：`node tests/dashboard_empty_package_check.mjs` 与前端 `npm run build` 通过。
 
 - 修复面板更新脚本在非安装目录执行时的失败链：`update_panel` 此前不加载 `.env`，compose 以空变量渲染（端口映射为空、`FRONTEND_PORT/DB_*/JWT_SECRET` 全部告警），且按当前目录解析项目名（如 `~/nexus-terminal` 下解析为 `nexus-terminal`），与历史安装残留的同名容器（`gost-mysql`）冲突导致 `up -d` 报 `container name already in use`。修复：新增 `load_env_file`（`set -a; source .env; set +a`）与 `validate_env`（校验 `DB_NAME/DB_USER/DB_PASSWORD/JWT_SECRET/FRONTEND_PORT/BACKEND_PORT`，缺失即终止并提示切换到安装目录）；新增 `remove_stale_containers` 按 compose 项目标签识别并清理归属异项目的同名残留容器（数据在命名卷中不受影响）；`down`/`up -d` 追加 `--remove-orphans`；`uninstall_panel` 同样先加载 `.env`。自检：`tests/panel_install_fix_check.sh`（docker 桩模拟残留容器场景，6 项断言全部通过，含 `bash -n` 语法检查）。

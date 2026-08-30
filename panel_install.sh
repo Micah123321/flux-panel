@@ -1336,6 +1336,7 @@ CREATE TABLE IF NOT EXISTS \`package_plan\` (
   \`duration_multiplier\` int(10) NOT NULL DEFAULT 1,
   \`user_group_id\` int(10) DEFAULT NULL,
   \`flow\` bigint(20) NOT NULL DEFAULT 0,
+  \`daily_flow\` bigint(20) NOT NULL DEFAULT 0 COMMENT "每日流量限制(GiB)，0=不限制",
   \`max_rules\` int(10) NOT NULL DEFAULT 0,
   \`speed_mbps\` int(10) NOT NULL DEFAULT 0,
   \`ip_limit\` int(10) NOT NULL DEFAULT 0,
@@ -1346,6 +1347,24 @@ CREATE TABLE IF NOT EXISTS \`package_plan\` (
   \`status\` int(10) NOT NULL DEFAULT 1,
   PRIMARY KEY (\`id\`)
 );
+
+-- package_plan 表：添加 daily_flow 字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'package_plan'
+        AND column_name = 'daily_flow'
+    ),
+    'ALTER TABLE \`package_plan\` ADD COLUMN \`daily_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "每日流量限制(GiB)，0=不限制" AFTER \`flow\`;',
+    'SELECT "Column \`daily_flow\` already exists in \`package_plan\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS \`device_group\` (
   \`id\` int(10) NOT NULL AUTO_INCREMENT,

@@ -26,8 +26,14 @@
 - 邀请返现奖励基数改为实付口径（应付 - 抵扣），无抵扣时与旧行为一致；`completePaidOrder` 到账校验与管理员确认的 `paidAmount` 同步改为实付口径。
 - 商店页购买进入支付模态框，3 秒轮询 `getMyOrders` 匹配订单状态（最长 5 分钟），到账自动刷新；`commerce-admin.tsx` 已拆分为 `commerce-admin/` 目录（index + constants + 六个 Section 子组件）。
 
+## 套餐管理修复（2026-08-30）
+
+- `package_plan.daily_flow` 必须同时存在于 `gost.sql` 和 `panel_install.sh`：安装脚本的 `CREATE TABLE IF NOT EXISTS package_plan` 包含该列，并在老库更新路径中用 information_schema 检查后幂等 `ALTER TABLE package_plan ADD COLUMN daily_flow ... AFTER flow`。
+- 管理员套餐页 `PlanSection.tsx` 中，`type` 当前只有保存语义，发放逻辑不按它分支；界面将 `1` 显示为“周期套餐”，真实开通时长仍由 `durationMultiplier * 30` 天决定。
+- 套餐保存失败时前端将 `daily_flow`/`Unknown column` 压缩为短提示；后端 `GlobalExceptionHandler` 对缺列异常返回“数据库结构不完整，请执行面板更新后重试”，完整异常保留在服务日志。
+
 ## 验证
 
 - 前端执行 `npm run build` 通过。
 - 后端当前环境没有 `mvn`/`javac`，用 `node tests/commerce_feature_check.mjs`、`node tests/invite_balance_check.mjs` 与 `node tests/dashboard_empty_package_check.mjs` 做关键接入点、金额语义、dashboard 空套餐/引导回归，以及 `/user/package` 空 DTO 兜底自检。
-- 每日流量限制链路用 `node tests/daily_flow_limit_check.mjs` 验证（覆盖 SQL/实体/DTO/发放/上报执行/重置恢复/前端展示的静态断言）。
+- 每日流量限制链路用 `node tests/daily_flow_limit_check.mjs` 验证（覆盖 SQL/安装脚本/实体/DTO/发放/上报执行/重置恢复/前端展示的静态断言）。
