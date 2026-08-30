@@ -8,12 +8,11 @@ import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
 import com.admin.mapper.AggregateForwardMapper;
 import com.admin.mapper.AggregateNodeGroupMapper;
+import com.admin.mapper.TunnelMapper;
 import com.admin.service.AggregateNodeGroupService;
 import com.admin.service.NodeService;
-import com.admin.service.TunnelService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -37,8 +36,7 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
     private AggregateForwardMapper aggregateForwardMapper;
 
     @Resource
-    @Lazy
-    private TunnelService tunnelService;
+    private TunnelMapper tunnelMapper;
 
     @Override
     public R createGroup(AggregateNodeGroupDto dto) {
@@ -125,9 +123,9 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         Integer forwardCount = aggregateForwardMapper.selectCount(new QueryWrapper<AggregateForward>()
                 .eq("status", STATUS_ACTIVE)
                 .and(wrapper -> wrapper.eq("entry_group_id", groupId).or().eq("exit_group_id", groupId)));
-        long tunnelCount = tunnelService.count(new QueryWrapper<Tunnel>()
+        Integer tunnelCount = tunnelMapper.selectCount(new QueryWrapper<Tunnel>()
                 .eq("in_group_id", groupId).or().eq("out_group_id", groupId));
-        return (forwardCount == null ? 0 : forwardCount) + tunnelCount;
+        return (forwardCount == null ? 0 : forwardCount) + (tunnelCount == null ? 0 : tunnelCount);
     }
 
     private R validateNodes(List<Long> nodeIds) {
