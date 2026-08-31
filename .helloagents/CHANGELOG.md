@@ -1,5 +1,9 @@
 # 变更记录
 
+## 2026-08-31
+
+- 修复生产 `/tunnel` 页面因旧库缺少 `tunnel.in_group_id/out_group_id` 报“数据库结构不完整”：生产库已幂等补列；`panel_install.sh` 更新流程改为先启动 MySQL、执行迁移，再启动后端/前端并等待后端健康，避免新版后端在迁移前启动失败。`tests/panel_install_fix_check.sh` 增加迁移顺序断言。自检：`bash tests/panel_install_fix_check.sh`、`bash -n panel_install.sh`、`node tests/aggregate_forward_ui_check.mjs` 通过。
+
 ## 2026-08-30
 
 - 修正聚合转发业务模型：`/aggregate-forward` 页面收敛为节点组管理，移除独立“新增聚合转发/转发规则”入口；后端 `AggregateForwardServiceImpl` 下线 create/update/resume，仅保留 legacy delete 清理历史服务。隧道管理新增节点组选择，`Tunnel`/`TunnelDto`/`TunnelListDto` 增加 `inGroupId/outGroupId` 与组名返回；普通转发按隧道节点组展开 GOST 服务，端口分配改为组内共同空闲端口，chain 支持出口组多节点 selector。安装脚本和 `gost.sql` 增加 `tunnel.in_group_id/out_group_id` 幂等迁移；配置上报清理补充识别 `agf_` 历史服务，处理 DB 行已清但节点残留服务的情况。自检：`node tests/aggregate_forward_ui_check.mjs`、前端 `npm run build`、生产 Docker 后端 `mvn clean package -DskipTests` 通过。

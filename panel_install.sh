@@ -484,44 +484,10 @@ update_panel() {
   echo "⬇️ 拉取最新镜像..."
   $DOCKER_CMD pull
 
-  echo "🚀 启动更新后的服务..."
-  $DOCKER_CMD up -d --remove-orphans
+  echo "🚀 启动数据库服务..."
+  $DOCKER_CMD up -d --remove-orphans mysql
 
-  # 等待服务启动
-  echo "⏳ 等待服务启动..."
-
-  # 检查后端容器健康状态
-  echo "🔍 检查后端服务状态..."
-  for i in {1..90}; do
-    if docker ps --format "{{.Names}}" | grep -q "^springboot-backend$"; then
-      BACKEND_HEALTH=$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo "unknown")
-      if [[ "$BACKEND_HEALTH" == "healthy" ]]; then
-        echo "✅ 后端服务健康检查通过"
-        break
-      elif [[ "$BACKEND_HEALTH" == "starting" ]]; then
-        # 继续等待
-        :
-      elif [[ "$BACKEND_HEALTH" == "unhealthy" ]]; then
-        echo "⚠️ 后端健康状态：$BACKEND_HEALTH"
-      fi
-    else
-      echo "⚠️ 后端容器未找到或未运行"
-      BACKEND_HEALTH="not_running"
-    fi
-    if [ $i -eq 90 ]; then
-      echo "❌ 后端服务启动超时（90秒）"
-      echo "🔍 当前状态：$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo '容器不存在')"
-      echo "🛑 更新终止"
-      return 1
-    fi
-    # 每15秒显示一次进度
-    if [ $((i % 15)) -eq 1 ]; then
-      echo "⏳ 等待后端服务启动... ($i/90) 状态：${BACKEND_HEALTH:-unknown}"
-    fi
-    sleep 1
-  done
-
-  # 检查数据库容器健康状态
+  # 等待数据库启动，旧库需要先完成迁移后才能启动新版后端。
   echo "🔍 检查数据库服务状态..."
   for i in {1..60}; do
     if docker ps --format "{{.Names}}" | grep -q "^gost-mysql$"; then
@@ -530,7 +496,6 @@ update_panel() {
         echo "✅ 数据库服务健康检查通过"
         break
       elif [[ "$DB_HEALTH" == "starting" ]]; then
-        # 继续等待
         :
       elif [[ "$DB_HEALTH" == "unhealthy" ]]; then
         echo "⚠️ 数据库健康状态：$DB_HEALTH"
@@ -545,7 +510,6 @@ update_panel() {
       echo "🛑 更新终止"
       return 1
     fi
-    # 每10秒显示一次进度
     if [ $((i % 10)) -eq 1 ]; then
       echo "⏳ 等待数据库服务启动... ($i/60) 状态：${DB_HEALTH:-unknown}"
     fi
@@ -553,62 +517,12 @@ update_panel() {
   done
 
   # 从容器环境变量获取数据库信息
-  echo "🔍 获取数据库配置信息..."
-
-  # 等待一下让服务完全就绪
-  echo "⏳ 等待服务完全就绪..."
-  sleep 5
-
-  # 先检查后端容器是否在运行
-  if ! docker ps --format "{{.Names}}" | grep -q "^springboot-backend$"; then
-    echo "❌ 后端容器未运行，无法获取数据库配置"
-    echo "🔍 当前运行的容器："
-    docker ps --format "table {{.Names}}\t{{.Status}}"
-    echo "🛑 更新终止"
-    return 1
-  fi
-
-  DB_INFO=$(docker exec springboot-backend env | grep "^DB_" 2>/dev/null || echo "")
-
-  if [[ -n "$DB_INFO" ]]; then
-    DB_NAME=$(echo "$DB_INFO" | grep "^DB_NAME=" | cut -d'=' -f2)
-    DB_PASSWORD=$(echo "$DB_INFO" | grep "^DB_PASSWORD=" | cut -d'=' -f2)
-    DB_USER=$(echo "$DB_INFO" | grep "^DB_USER=" | cut -d'=' -f2)
-    DB_HOST=$(echo "$DB_INFO" | grep "^DB_HOST=" | cut -d'=' -f2)
-
-    echo "📋 数据库配置："
-    echo "   数据库名: $DB_NAME"
-    echo "   用户名: $DB_USER"
-    echo "   主机: $DB_HOST"
-  else
-    echo "❌ 无法获取数据库配置信息"
-    echo "🔍 尝试诊断问题："
-    echo "   容器状态: $(docker inspect -f '{{.State.Status}}' springboot-backend 2>/dev/null || echo '容器不存在')"
-    echo "   健康状态: $(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo '无健康检查')"
-
-    # 尝试从 .env 文件读取配置
-    if [[ -f ".env" ]]; then
-      echo "🔄 尝试从 .env 文件读取配置..."
-      DB_NAME=$(grep "^DB_NAME=" .env | cut -d'=' -f2 2>/dev/null)
-      DB_PASSWORD=$(grep "^DB_PASSWORD=" .env | cut -d'=' -f2 2>/dev/null)
-      DB_USER=$(grep "^DB_USER=" .env | cut -d'=' -f2 2>/dev/null)
-
-      if [[ -n "$DB_NAME" && -n "$DB_PASSWORD" && -n "$DB_USER" ]]; then
-        echo "✅ 从 .env 文件成功读取数据库配置"
-        echo "📋 数据库配置："
-        echo "   数据库名: $DB_NAME"
-        echo "   用户名: $DB_USER"
-      else
-        echo "❌ .env 文件中的数据库配置不完整"
-        echo "🛑 更新终止"
-        return 1
-      fi
-    else
-      echo "❌ 未找到 .env 文件"
-      echo "🛑 更新终止"
-      return 1
-    fi
-  fi
+  echo "🔍 使用 .env 中的数据库配置信息..."
+  DB_HOST=${DB_HOST:-mysql}
+  echo "📋 数据库配置："
+  echo "   数据库名: $DB_NAME"
+  echo "   用户名: $DB_USER"
+  echo "   主机: $DB_HOST"
 
   # 检查必要的数据库配置
   if [[ -z "$DB_PASSWORD" || -z "$DB_USER" || -z "$DB_NAME" ]]; then
@@ -1772,6 +1686,37 @@ EOF
 
   # 清理临时文件
   rm -f temp_migration.sql
+
+  echo "🚀 启动后端和前端服务..."
+  $DOCKER_CMD up -d --remove-orphans backend frontend
+
+  echo "🔍 检查后端服务状态..."
+  for i in {1..90}; do
+    if docker ps --format "{{.Names}}" | grep -q "^springboot-backend$"; then
+      BACKEND_HEALTH=$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo "unknown")
+      if [[ "$BACKEND_HEALTH" == "healthy" ]]; then
+        echo "✅ 后端服务健康检查通过"
+        break
+      elif [[ "$BACKEND_HEALTH" == "starting" ]]; then
+        :
+      elif [[ "$BACKEND_HEALTH" == "unhealthy" ]]; then
+        echo "⚠️ 后端健康状态：$BACKEND_HEALTH"
+      fi
+    else
+      echo "⚠️ 后端容器未找到或未运行"
+      BACKEND_HEALTH="not_running"
+    fi
+    if [ $i -eq 90 ]; then
+      echo "❌ 后端服务启动超时（90秒）"
+      echo "🔍 当前状态：$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo '容器不存在')"
+      echo "🛑 更新终止"
+      return 1
+    fi
+    if [ $((i % 15)) -eq 1 ]; then
+      echo "⏳ 等待后端服务启动... ($i/90) 状态：${BACKEND_HEALTH:-unknown}"
+    fi
+    sleep 1
+  done
 
   echo "✅ 更新完成"
 }

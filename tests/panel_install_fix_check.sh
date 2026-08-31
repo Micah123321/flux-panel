@@ -5,6 +5,17 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 bash -n "$REPO_DIR/panel_install.sh" && echo "PASS: bash -n syntax"
 
+UPDATE_BLOCK="$(sed -n '/^update_panel()/,/^}/p' "$REPO_DIR/panel_install.sh")"
+MYSQL_LINE=$(echo "$UPDATE_BLOCK" | grep -n 'up -d --remove-orphans mysql' | head -n1 | cut -d: -f1)
+MIGRATION_LINE=$(echo "$UPDATE_BLOCK" | grep -n '执行数据库结构更新' | head -n1 | cut -d: -f1)
+BACKEND_LINE=$(echo "$UPDATE_BLOCK" | grep -n 'up -d --remove-orphans backend frontend' | head -n1 | cut -d: -f1)
+if [[ -n "$MYSQL_LINE" && -n "$MIGRATION_LINE" && -n "$BACKEND_LINE" && $MYSQL_LINE -lt $MIGRATION_LINE && $MIGRATION_LINE -lt $BACKEND_LINE ]]; then
+  echo "PASS: update_panel migrates before backend start"
+else
+  echo "FAIL: update_panel migration order mysql=$MYSQL_LINE migration=$MIGRATION_LINE backend=$BACKEND_LINE"
+  exit 1
+fi
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 cd "$TMP_DIR"
