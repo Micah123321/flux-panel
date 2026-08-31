@@ -8,6 +8,8 @@ const tunnelPage = read('vite-frontend/src/pages/tunnel.tsx');
 const forwardPage = read('vite-frontend/src/pages/forward.tsx');
 const groupService = read('springboot-backend/src/main/java/com/admin/service/impl/AggregateNodeGroupServiceImpl.java');
 const aggregateService = read('springboot-backend/src/main/java/com/admin/service/impl/AggregateForwardServiceImpl.java');
+const forwardServiceInterface = read('springboot-backend/src/main/java/com/admin/service/ForwardService.java');
+const aggregateServiceInterface = read('springboot-backend/src/main/java/com/admin/service/AggregateForwardService.java');
 const tunnelDto = read('springboot-backend/src/main/java/com/admin/common/dto/TunnelDto.java');
 const tunnelEntity = read('springboot-backend/src/main/java/com/admin/entity/Tunnel.java');
 const forwardService = read('springboot-backend/src/main/java/com/admin/service/impl/ForwardServiceImpl.java');
@@ -17,9 +19,13 @@ const gostSql = read('gost.sql');
 
 assert.match(groupService, /item\.put\("portSta", node\.getPortSta\(\)\);/, '节点组接口未返回 portSta');
 assert.match(groupService, /item\.put\("portEnd", node\.getPortEnd\(\)\);/, '节点组接口未返回 portEnd');
-assert.match(groupService, /activeReferenceCount/, '节点组缺少隧道引用保护');
+assert.match(groupService, /activeReferenceCount/, '节点组缺少删除引用保护');
 assert.match(groupService, /in_group_id/, '节点组删除保护未检查入口节点组隧道引用');
 assert.match(groupService, /out_group_id/, '节点组删除保护未检查出口节点组隧道引用');
+assert.doesNotMatch(groupService, /不能修改成员/, '节点组成员不应因被隧道使用而禁止修改');
+assert.match(groupService, /refreshReferencedTunnelPrimaryNodes/, '节点组成员更新后未刷新隧道兼容首节点');
+assert.match(groupService, /forwardService\.syncNodeGroupForwards/, '节点组成员更新后未同步普通转发');
+assert.match(groupService, /aggregateForwardService\.syncNodeGroupForwards/, '节点组成员更新后未同步历史聚合转发');
 
 assert.doesNotMatch(aggregatePage, /新增聚合转发|转发规则|createAggregateForward|getAggregateForwards|MAX_PORT_SPAN/, '聚合页仍暴露独立聚合转发规则入口');
 assert.match(aggregatePage, /新增节点组/, '聚合页应保留节点组创建入口');
@@ -59,5 +65,11 @@ assert.match(forwardService, /resolveTunnelNodes\(tunnel\.getOutGroupId\(\), tun
 assert.match(forwardService, /buildNodeRemoteAddr\(nodeInfo\.getOutNodes\(\), forward\.getOutPort\(\)\)/, '隧道转发 chain 未使用出口节点组');
 assert.match(forwardService, /String strategy = tunnelStrategy\(tunnel\);/, 'GOST 下发策略应来自隧道');
 assert.doesNotMatch(forwardService, /forward\.getStrategy\(\)/, 'GOST 下发不应再读取转发策略');
+assert.match(forwardServiceInterface, /syncNodeGroupForwards/, '普通转发服务缺少节点组动态同步接口');
+assert.match(forwardService, /deleteRemovedGroupNodeServices/, '普通转发同步未清理移除节点服务');
+assert.match(forwardService, /updateGostServices\(forward, tunnel/, '普通转发同步未更新当前节点服务');
+assert.match(aggregateServiceInterface, /syncNodeGroupForwards/, '历史聚合转发服务缺少节点组动态同步接口');
+assert.match(aggregateService, /deleteRemovedEntryServices/, '历史聚合转发同步未清理移除入口节点服务');
+assert.match(aggregateService, /updateForwardServices/, '历史聚合转发同步未更新当前入口节点服务');
 
 console.log('aggregate-forward corrected model check passed');

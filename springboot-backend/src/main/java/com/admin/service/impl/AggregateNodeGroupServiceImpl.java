@@ -9,10 +9,13 @@ import com.admin.entity.Tunnel;
 import com.admin.mapper.AggregateForwardMapper;
 import com.admin.mapper.AggregateNodeGroupMapper;
 import com.admin.mapper.TunnelMapper;
+import com.admin.service.AggregateForwardService;
 import com.admin.service.AggregateNodeGroupService;
+import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -37,6 +40,14 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
 
     @Resource
     private TunnelMapper tunnelMapper;
+
+    @Resource
+    @Lazy
+    private ForwardService forwardService;
+
+    @Resource
+    @Lazy
+    private AggregateForwardService aggregateForwardService;
 
     @Override
     public R createGroup(AggregateNodeGroupDto dto) {
@@ -74,16 +85,34 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
             return validation;
         }
 
+        List<Long> oldNodeIds = parseNodeIds(group);
         String nextNodeIds = joinNodeIds(nodeIds);
-        if (!nextNodeIds.equals(group.getNodeIds()) && activeReferenceCount(group.getId()) > 0) {
-            return R.err("节点组正在被隧道或运行中的聚合转发使用，不能修改成员");
-        }
+        boolean membersChanged = !nextNodeIds.equals(group.getNodeIds());
 
         group.setName(dto.getName().trim());
         group.setNodeIds(nextNodeIds);
         group.setRemark(trimToNull(dto.getRemark()));
         group.setUpdatedTime(System.currentTimeMillis());
-        return updateById(group) ? R.ok(enrichGroup(group)) : R.err("节点组更新失败");
+        if (!updateById(group)) {
+            return R.err("节点组更新失败");
+        }
+
+        Map<String, Object> data = enrichGroup(group);
+        if (membersChanged) {
+            refreshReferencedTunnelPrimaryNodes(group.getId(), nodeIds);
+            R forwardSync = forwardService.syncNodeGroupForwards(group.getId(), oldNodeIds, nodeIds);
+            R aggregateSync = aggregateForwardService.syncNodeGroupForwards(group.getId(), oldNodeIds, nodeIds);
+            Map<String, Object> syncData = new LinkedHashMap<>();
+            syncData.put("forwards", forwardSync.getData());
+            syncData.put("aggregateForwards", aggregateSync.getData());
+            data.put("sync", syncData);
+            if (forwardSync.getCode() != 0 || aggregateSync.getCode() != 0) {
+                R res = R.ok(data);
+                res.setMsg("节点组更新成功，但部分转发同步失败");
+                return res;
+            }
+        }
+        return R.ok(data);
     }
 
     @Override
@@ -186,6 +215,44 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         data.put("createdTime", group.getCreatedTime());
         data.put("updatedTime", group.getUpdatedTime());
         return data;
+    }
+
+    private void refreshReferencedTunnelPrimaryNodes(Long groupId, List<Long> nodeIds) {
+        if (nodeIds.isEmpty()) {
+            return;
+        }
+        Node primaryNode = nodeService.getById(nodeIds.get(0));
+        if (primaryNode == null) {
+            return;
+        }
+        String primaryAddress = firstNodeAddress(primaryNode);
+        List<Tunnel> tunnels = tunnelMapper.selectList(new QueryWrapper<Tunnel>()
+                .and(wrapper -> wrapper.eq("in_group_id", groupId).or().eq("out_group_id", groupId)));
+        long now = System.currentTimeMillis();
+        for (Tunnel tunnel : tunnels) {
+            boolean changed = false;
+            if (groupId.equals(tunnel.getInGroupId())) {
+                tunnel.setInNodeId(primaryNode.getId());
+                tunnel.setInIp(primaryAddress);
+                changed = true;
+            }
+            if (groupId.equals(tunnel.getOutGroupId())) {
+                tunnel.setOutNodeId(primaryNode.getId());
+                tunnel.setOutIp(primaryAddress);
+                changed = true;
+            }
+            if (changed) {
+                tunnel.setUpdatedTime(now);
+                tunnelMapper.updateById(tunnel);
+            }
+        }
+    }
+
+    private String firstNodeAddress(Node node) {
+        if (node.getServerIp() != null && !node.getServerIp().trim().isEmpty()) {
+            return node.getServerIp().trim();
+        }
+        return node.getIp();
     }
 
     private String trimToNull(String value) {

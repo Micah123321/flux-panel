@@ -140,6 +140,124 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
         return R.err(DEPRECATED_FORWARD_MSG);
     }
 
+    @Override
+    public R syncNodeGroupForwards(Long groupId, List<Long> oldNodeIds, List<Long> newNodeIds) {
+        if (groupId == null) {
+            return R.err("节点组ID不能为空");
+        }
+        List<Node> removedNodes = resolveNodesByIds(removedNodeIds(oldNodeIds, newNodeIds));
+        List<AggregateForward> forwards = list(new QueryWrapper<AggregateForward>()
+                .eq("status", STATUS_ACTIVE)
+                .and(wrapper -> wrapper.eq("entry_group_id", groupId).or().eq("exit_group_id", groupId)));
+
+        int total = 0;
+        int success = 0;
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (AggregateForward forward : forwards) {
+            total++;
+            R result = syncAggregateForwardAfterGroupChange(groupId, removedNodes, forward);
+            if (result.getCode() == 0) {
+                success++;
+            } else {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("aggregateForwardId", forward.getId());
+                item.put("aggregateForwardName", forward.getName());
+                item.put("reason", result.getMsg());
+                failed.add(item);
+            }
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("total", total);
+        data.put("success", success);
+        data.put("failed", failed);
+        if (failed.isEmpty()) {
+            return R.ok(data);
+        }
+        R res = R.err("部分历史聚合转发同步失败");
+        res.setData(data);
+        return res;
+    }
+
+    private R syncAggregateForwardAfterGroupChange(Long groupId, List<Node> removedNodes, AggregateForward forward) {
+        if (Objects.equals(forward.getEntryGroupId(), groupId) && !removedNodes.isEmpty()) {
+            R deleteResult = deleteRemovedEntryServices(forward, removedNodes);
+            if (deleteResult.getCode() != 0) {
+                return deleteResult;
+            }
+        }
+        ValidationContext context = resolveServiceContext(forward);
+        if (context.isHasError()) {
+            return R.err(context.getErrorMessage());
+        }
+        return updateForwardServices(forward, context);
+    }
+
+    private R deleteRemovedEntryServices(AggregateForward forward, List<Node> removedNodes) {
+        List<String> serviceNames = buildServiceNames(forward);
+        for (Node removedNode : removedNodes) {
+            R result = deleteServiceNames(removedNode, serviceNames);
+            if (result.getCode() != 0) {
+                return result;
+            }
+        }
+        return R.ok();
+    }
+
+    private R updateForwardServices(AggregateForward forward, ValidationContext context) {
+        Tunnel listen = new Tunnel();
+        listen.setTcpListenAddr("[::]");
+        listen.setUdpListenAddr("[::]");
+        String strategy = MODE_LOAD_BALANCE.equals(forward.getMode()) ? "round" : "fifo";
+        for (int entryPort = forward.getEntryPortStart(); entryPort <= forward.getEntryPortEnd(); entryPort++) {
+            int targetPort = forward.getTargetPortStart() + (entryPort - forward.getEntryPortStart());
+            String remoteAddr = buildRemoteAddr(context.getExitNodes(), targetPort);
+            for (Node entryNode : context.getEntryNodes()) {
+                String serviceName = buildServiceName(forward.getId(), entryPort);
+                GostDto result = GostUtil.UpdateService(entryNode.getId(), serviceName, entryPort, null, remoteAddr, 1, listen, strategy, forward.getInterfaceName());
+                if (isGostNotFound(result)) {
+                    result = GostUtil.AddService(entryNode.getId(), serviceName, entryPort, null, remoteAddr, 1, listen, strategy, forward.getInterfaceName());
+                }
+                if (!GOST_SUCCESS_MSG.equals(result.getMsg())) {
+                    return R.err("入口节点 " + entryNode.getName() + " 同步服务失败: " + result.getMsg());
+                }
+            }
+        }
+        return R.ok();
+    }
+
+    private List<Long> removedNodeIds(List<Long> oldNodeIds, List<Long> newNodeIds) {
+        Set<Long> newSet = new HashSet<>();
+        if (newNodeIds != null) {
+            newSet.addAll(newNodeIds);
+        }
+        List<Long> removed = new ArrayList<>();
+        if (oldNodeIds != null) {
+            for (Long nodeId : oldNodeIds) {
+                if (nodeId != null && !newSet.contains(nodeId)) {
+                    removed.add(nodeId);
+                }
+            }
+        }
+        return removed;
+    }
+
+    private List<Node> resolveNodesByIds(List<Long> nodeIds) {
+        List<Node> nodes = new ArrayList<>();
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return nodes;
+        }
+        Map<Long, Node> nodeMap = nodeService.listByIds(nodeIds).stream()
+                .collect(Collectors.toMap(Node::getId, node -> node, (first, ignored) -> first));
+        for (Long nodeId : nodeIds) {
+            Node node = nodeMap.get(nodeId);
+            if (node != null) {
+                nodes.add(node);
+            }
+        }
+        return nodes;
+    }
+
     private AggregateForward buildForward(AggregateForwardDto dto, AggregateForward forward) {
         forward.setName(dto.getName().trim());
         forward.setEntryGroupId(dto.getEntryGroupId());

@@ -95,6 +95,11 @@ public interface ForwardService extends IService<Forward> {
      */
     R deleteForwards(List<Long> ids, boolean force);
 
+    /**
+     * 节点组成员变化后，同步所有引用该节点组的转发服务。
+     */
+    R syncNodeGroupForwards(Long groupId, List<Long> oldNodeIds, List<Long> newNodeIds);
+
 
     void updateForwardA(Forward forward);
 }

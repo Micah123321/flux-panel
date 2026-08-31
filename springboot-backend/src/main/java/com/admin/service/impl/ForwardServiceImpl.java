@@ -486,6 +486,126 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         res.setData(data);
         return res;
     }
+    @Override
+    public R syncNodeGroupForwards(Long groupId, List<Long> oldNodeIds, List<Long> newNodeIds) {
+        if (groupId == null) {
+            return R.err("节点组ID不能为空");
+        }
+        List<Long> removedNodeIds = removedNodeIds(oldNodeIds, newNodeIds);
+        List<Node> removedNodes = resolveNodesByIds(removedNodeIds);
+        List<Tunnel> tunnels = tunnelService.list(new QueryWrapper<Tunnel>()
+                .and(wrapper -> wrapper.eq("in_group_id", groupId).or().eq("out_group_id", groupId)));
+
+        int total = 0;
+        int success = 0;
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Tunnel tunnel : tunnels) {
+            List<Forward> forwards = list(new QueryWrapper<Forward>()
+                    .eq("tunnel_id", tunnel.getId())
+                    .eq("status", FORWARD_STATUS_ACTIVE));
+            for (Forward forward : forwards) {
+                total++;
+                R result = syncForwardAfterGroupChange(groupId, removedNodes, tunnel, forward);
+                if (result.getCode() == 0) {
+                    success++;
+                } else {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("forwardId", forward.getId());
+                    item.put("forwardName", forward.getName());
+                    item.put("tunnelId", tunnel.getId());
+                    item.put("reason", result.getMsg());
+                    failed.add(item);
+                }
+            }
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("total", total);
+        data.put("success", success);
+        data.put("failed", failed);
+        if (failed.isEmpty()) {
+            return R.ok(data);
+        }
+        R res = R.err("部分转发同步失败");
+        res.setData(data);
+        return res;
+    }
+
+    private R syncForwardAfterGroupChange(Long groupId, List<Node> removedNodes, Tunnel tunnel, Forward forward) {
+        UserTunnel userTunnel = getUserTunnel(forward.getUserId(), tunnel.getId().intValue());
+        R deleteResult = deleteRemovedGroupNodeServices(groupId, removedNodes, tunnel, forward, userTunnel);
+        if (deleteResult.getCode() != 0) {
+            return deleteResult;
+        }
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
+        }
+        Integer limiter = userTunnel == null ? null : userTunnel.getSpeedId();
+        return updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel);
+    }
+
+    private R deleteRemovedGroupNodeServices(Long groupId, List<Node> removedNodes, Tunnel tunnel, Forward forward, UserTunnel userTunnel) {
+        if (removedNodes.isEmpty()) {
+            return R.ok();
+        }
+        String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
+        boolean entryGroupChanged = Objects.equals(tunnel.getInGroupId(), groupId);
+        boolean outGroupChanged = Objects.equals(tunnel.getOutGroupId(), groupId);
+        if (entryGroupChanged) {
+            for (Node removedNode : removedNodes) {
+                GostDto serviceResult = GostUtil.DeleteService(removedNode.getId(), serviceName);
+                if (!isGostOperationSuccess(serviceResult) && !isGostNotFound(serviceResult)) {
+                    return R.err(serviceResult.getMsg());
+                }
+                if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+                    GostDto chainResult = GostUtil.DeleteChains(removedNode.getId(), serviceName);
+                    if (!isGostOperationSuccess(chainResult) && !isGostNotFound(chainResult)) {
+                        return R.err(chainResult.getMsg());
+                    }
+                }
+            }
+        }
+        if (outGroupChanged && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+            for (Node removedNode : removedNodes) {
+                GostDto remoteResult = GostUtil.DeleteRemoteService(removedNode.getId(), serviceName);
+                if (!isGostOperationSuccess(remoteResult) && !isGostNotFound(remoteResult)) {
+                    return R.err(remoteResult.getMsg());
+                }
+            }
+        }
+        return R.ok();
+    }
+
+    private List<Long> removedNodeIds(List<Long> oldNodeIds, List<Long> newNodeIds) {
+        Set<Long> newSet = new HashSet<>(newNodeIds == null ? Collections.emptyList() : newNodeIds);
+        List<Long> removed = new ArrayList<>();
+        if (oldNodeIds != null) {
+            for (Long nodeId : oldNodeIds) {
+                if (nodeId != null && !newSet.contains(nodeId)) {
+                    removed.add(nodeId);
+                }
+            }
+        }
+        return removed;
+    }
+
+    private List<Node> resolveNodesByIds(List<Long> nodeIds) {
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, Node> nodeMap = nodeService.listByIds(nodeIds).stream()
+                .collect(Collectors.toMap(Node::getId, node -> node, (first, ignored) -> first));
+        List<Node> nodes = new ArrayList<>();
+        for (Long nodeId : nodeIds) {
+            Node node = nodeMap.get(nodeId);
+            if (node != null) {
+                nodes.add(node);
+            }
+        }
+        return nodes;
+    }
+
 
     /**
      * 改变转发状态（暂停/恢复）
