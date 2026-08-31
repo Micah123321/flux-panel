@@ -41,4 +41,9 @@ public class TunnelListDto {
      * 协议类型
      */
     private String protocol;
+
+    /**
+     * 节点组调度策略
+     */
+    private String strategy;
 }

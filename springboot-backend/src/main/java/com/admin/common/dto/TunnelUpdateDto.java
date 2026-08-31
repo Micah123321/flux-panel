@@ -31,6 +31,9 @@ public class TunnelUpdateDto {
     @NotBlank
     private String protocol;
 
+    // 节点组调度策略，默认为fifo
+    private String strategy;
+
     // TCP监听地址
     @NotBlank
     private String tcpListenAddr;

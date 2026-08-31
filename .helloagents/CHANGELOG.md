@@ -2,6 +2,7 @@
 
 ## 2026-08-31
 
+- 将节点组调度策略从转发上移到隧道：`Tunnel.strategy` 支持 `round/fifo/rand/hash`，新节点组隧道默认轮询；隧道创建/编辑页新增负载策略，转发页移除策略选择并展示隧道策略。后端 GOST 下发统一使用隧道策略，隧道策略变更会同步重下发已有转发；转发列表和诊断展开节点组入口，避免只显示/诊断首个节点。`gost.sql` 与 `panel_install.sh` 增加 `tunnel.strategy` 幂等迁移，节点组隧道遇到旧转发默认 `fifo` 时迁移为 `round`。自检：`node tests/aggregate_forward_ui_check.mjs`、前端 `npm run build` 通过；本机无 `mvn`。
 - 修复生产 `/tunnel` 页面因旧库缺少 `tunnel.in_group_id/out_group_id` 报“数据库结构不完整”：生产库已幂等补列；`panel_install.sh` 更新流程改为先启动 MySQL、执行迁移，再启动后端/前端并等待后端健康，避免新版后端在迁移前启动失败。`tests/panel_install_fix_check.sh` 增加迁移顺序断言。自检：`bash tests/panel_install_fix_check.sh`、`bash -n panel_install.sh`、`node tests/aggregate_forward_ui_check.mjs` 通过。
 
 ## 2026-08-30

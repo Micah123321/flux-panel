@@ -976,6 +976,38 @@ UPDATE \`forward\`
 SET \`strategy\` = 'fifo'
 WHERE \`strategy\` IS NULL;
 
+-- tunnel 表：添加 strategy 字段（隧道级负载均衡策略）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'tunnel'
+        AND column_name = 'strategy'
+    ),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`strategy\` VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT "round" COMMENT "隧道级负载均衡策略" AFTER \`protocol\`;',
+    'SELECT "Column \`strategy\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 从已有转发迁移隧道策略；节点组隧道忽略旧转发单目标自动写入的 fifo，默认使用轮询策略。
+UPDATE \`tunnel\` t
+LEFT JOIN (
+  SELECT tunnel_id, SUBSTRING_INDEX(GROUP_CONCAT(strategy ORDER BY updated_time DESC), ',', 1) AS strategy
+  FROM \`forward\`
+  WHERE strategy IS NOT NULL AND strategy <> ''
+  GROUP BY tunnel_id
+) f ON f.tunnel_id = t.id
+SET t.\`strategy\` = CASE
+  WHEN (t.\`in_group_id\` IS NOT NULL OR t.\`out_group_id\` IS NOT NULL) AND COALESCE(f.strategy, '') = 'fifo' THEN 'round'
+  ELSE COALESCE(NULLIF(f.strategy, ''), 'round')
+END
+WHERE t.\`strategy\` IS NULL OR t.\`strategy\` = '';
+
 -- forward 表：添加 inx 字段（排序索引）
 SET @sql = (
   SELECT IF(

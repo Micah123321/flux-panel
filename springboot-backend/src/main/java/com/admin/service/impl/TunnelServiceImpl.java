@@ -57,6 +57,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /** 节点状态常量 */
     private static final int NODE_STATUS_ONLINE = 1;        // 节点在线状态
 
+    /** GOST 负载调度策略 */
+    private static final String DEFAULT_STRATEGY = "round";
+    private static final Set<String> VALID_STRATEGIES = new HashSet<>(Arrays.asList("fifo", "round", "rand", "hash"));
+
     /** 用户角色常量 */
     private static final int ADMIN_ROLE_ID = 0;             // 管理员角色ID
 
@@ -131,9 +135,14 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (inSelection.isHasError()) {
             return R.err(inSelection.getErrorMessage());
         }
+        String strategy = normalizeStrategy(tunnelDto.getStrategy());
+        if (strategy == null) {
+            return R.err("负载策略无效");
+        }
 
         // 4. 构建隧道实体
         Tunnel tunnel = buildTunnelEntity(tunnelDto, inSelection);
+        tunnel.setStrategy(strategy);
 
         // 5. 根据隧道类型设置出口参数
         R outNodeSetupResult = setupOutNodeParameters(tunnel, tunnelDto, inSelection);
@@ -178,11 +187,17 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (nameValidationResult.getCode() != 0) {
             return nameValidationResult;
         }
+        String strategy = normalizeStrategy(tunnelUpdateDto.getStrategy());
+        if (strategy == null) {
+            return R.err("负载策略无效");
+        }
+
         int up = 0;
         if (!Objects.equals(existingTunnel.getTcpListenAddr(), tunnelUpdateDto.getTcpListenAddr()) ||
                 !Objects.equals(existingTunnel.getUdpListenAddr(), tunnelUpdateDto.getUdpListenAddr()) ||
                 !Objects.equals(existingTunnel.getProtocol(), tunnelUpdateDto.getProtocol()) ||
-                !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName())) {
+                !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName()) ||
+                !Objects.equals(normalizeStrategy(existingTunnel.getStrategy()), strategy)) {
             up++;
         }
 
@@ -194,11 +209,11 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         existingTunnel.setUdpListenAddr(tunnelUpdateDto.getUdpListenAddr());
         existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio());
         existingTunnel.setProtocol(tunnelUpdateDto.getProtocol());
+        existingTunnel.setStrategy(strategy);
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
         this.updateById(existingTunnel);
         int err = 0;
         if (up != 0){
-            System.out.println("123123");
             List<Forward> tunnel = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnelUpdateDto.getId()));
             if (!tunnel.isEmpty()) {
                 for (Forward forward : tunnel) {
@@ -208,7 +223,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                     forwardUpdateDto.setName(forward.getName());
                     forwardUpdateDto.setTunnelId(forward.getTunnelId());
                     forwardUpdateDto.setRemoteAddr(forward.getRemoteAddr());
-                    forwardUpdateDto.setStrategy(forward.getStrategy());
+                    forwardUpdateDto.setStrategy(strategy);
                     forwardUpdateDto.setInPort(forward.getInPort());
                     forwardUpdateDto.setInterfaceName(forward.getInterfaceName());
                     R r = forwardService.updateForward(forwardUpdateDto);
@@ -519,6 +534,14 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         return second.stream().anyMatch(node -> firstIds.contains(node.getId()));
     }
 
+    private String normalizeStrategy(String strategy) {
+        if (StrUtil.isBlank(strategy)) {
+            return DEFAULT_STRATEGY;
+        }
+        String normalized = strategy.trim().toLowerCase(Locale.ROOT);
+        return VALID_STRATEGIES.contains(normalized) ? normalized : null;
+    }
+
     private String firstNodeAddress(Node node) {
         if (StringUtils.isNotBlank(node.getServerIp())) {
             return node.getServerIp();
@@ -677,6 +700,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         dto.setIp(tunnel.getInIp());
         dto.setType(tunnel.getType());
         dto.setProtocol(tunnel.getProtocol());
+        dto.setStrategy(normalizeStrategy(tunnel.getStrategy()));
 
         dto.setInGroupId(tunnel.getInGroupId());
         dto.setOutGroupId(tunnel.getOutGroupId());
@@ -714,7 +738,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             return R.err(ERROR_TUNNEL_NOT_FOUND);
         }
 
-        // 2. 获取入口和出口代表节点。节点组隧道诊断只取首个节点做快速检查。
+        // 2. 获取入口和出口节点，节点组隧道会诊断组内全部节点。
         NodeSelection inSelection = resolveTunnelNodeSelection(tunnel.getInGroupId(), tunnel.getInNodeId(), "入口节点");
         if (inSelection.isHasError()) {
             return R.err(inSelection.getErrorMessage());
@@ -734,14 +758,17 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
         // 3. 根据隧道类型执行不同的诊断策略
         if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
-            // 端口转发：只给入口节点发送诊断指令，TCP ping谷歌443端口
-            DiagnosisResult inResult = performTcpPingDiagnosisWithConnectionCheck(inNode, "www.google.com", 443, "入口->外网");
-            results.add(inResult);
+            for (Node node : inSelection.getNodes()) {
+                DiagnosisResult inResult = performTcpPingDiagnosisWithConnectionCheck(node, "www.google.com", 443, "入口->外网");
+                results.add(inResult);
+            }
         } else {
             // 隧道转发：入口TCP ping出口，出口TCP ping谷歌443端口
             int outNodePort = getOutNodeTcpPort(tunnel.getId());
-            DiagnosisResult inToOutResult = performTcpPingDiagnosisWithConnectionCheck(inNode, outNode.getServerIp(), outNodePort, "入口->出口");
-            results.add(inToOutResult);
+            for (Node node : inSelection.getNodes()) {
+                DiagnosisResult inToOutResult = performTcpPingDiagnosisWithConnectionCheck(node, outNode.getServerIp(), outNodePort, "入口->出口");
+                results.add(inToOutResult);
+            }
 
             // 先检查出口节点的真实连接状态，然后再进行诊断
             DiagnosisResult outToExternalResult = performTcpPingDiagnosisWithConnectionCheck(outNode, "www.google.com", 443, "出口->外网");

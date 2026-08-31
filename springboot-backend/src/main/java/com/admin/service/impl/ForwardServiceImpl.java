@@ -47,6 +47,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int FORWARD_STATUS_PAUSED = 0;
     private static final int FORWARD_STATUS_ERROR = -1;
     private static final int TUNNEL_STATUS_ACTIVE = 1;
+    private static final String DEFAULT_STRATEGY = "round";
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
 
@@ -97,7 +98,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 5. 创建并保存Forward对象
-        Forward forward = createForwardEntity(forwardDto, currentUser, portAllocation);
+        Forward forward = createForwardEntity(forwardDto, tunnel, currentUser, portAllocation);
         if (!this.save(forward)) {
             return R.err("端口转发创建失败");
         }
@@ -213,8 +214,45 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } else {
             forwardList = baseMapper.selectAllForwardsWithTunnel();
         }
+        enrichForwardTunnelData(forwardList);
 
         return R.ok(forwardList);
+    }
+
+    private void enrichForwardTunnelData(List<ForwardWithTunnelDto> forwardList) {
+        if (forwardList == null || forwardList.isEmpty()) {
+            return;
+        }
+        Set<Long> tunnelIds = forwardList.stream()
+                .map(ForwardWithTunnelDto::getTunnelId)
+                .filter(Objects::nonNull)
+                .map(Integer::longValue)
+                .collect(Collectors.toSet());
+        if (tunnelIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Tunnel> tunnelMap = tunnelService.listByIds(tunnelIds).stream()
+                .collect(Collectors.toMap(Tunnel::getId, tunnel -> tunnel, (first, ignored) -> first));
+
+        for (ForwardWithTunnelDto dto : forwardList) {
+            if (dto.getTunnelId() == null) {
+                continue;
+            }
+            Tunnel tunnel = tunnelMap.get(dto.getTunnelId().longValue());
+            if (tunnel == null) {
+                continue;
+            }
+            String strategy = tunnelStrategy(tunnel);
+            dto.setTunnelStrategy(strategy);
+            dto.setStrategy(strategy);
+
+            List<Node> inNodes = resolveTunnelNodes(tunnel.getInGroupId(), tunnel.getInNodeId());
+            if (!inNodes.isEmpty()) {
+                dto.setEntryNodeCount(inNodes.size());
+                dto.setEntryNodeNames(inNodes.stream().map(Node::getName).collect(Collectors.joining("\n")));
+                dto.setInIp(inNodes.stream().map(this::firstNodeAddress).filter(addr -> !addr.isEmpty()).collect(Collectors.joining("\n")));
+            }
+        }
     }
 
     @Override
@@ -571,52 +609,49 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("隧道不存在");
         }
 
-        // 4. 获取入口节点信息
-        Node inNode = nodeService.getNodeById(tunnel.getInNodeId());
-        if (inNode == null) {
-            return R.err("入口节点不存在");
+        // 4. 获取节点组展开后的入口/出口节点信息
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
         }
-
 
         List<DiagnosisResult> results = new ArrayList<>();
         String[] remoteAddresses = forward.getRemoteAddr().split(",");
         // 6. 根据隧道类型执行不同的诊断策略
         if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
-            // 端口转发：入口节点直接TCP ping目标地址
-            for (String remoteAddress : remoteAddresses) {
-                // 提取IP和端口
-                String targetIp = extractIpFromAddress(remoteAddress);
-                int targetPort = extractPortFromAddress(remoteAddress);
-                if (targetIp == null || targetPort == -1) {
-                    return R.err("无法解析目标地址: " + remoteAddress);
-                }
+            // 端口转发：每个入口节点都应能直连目标地址。
+            for (Node inNode : nodeInfo.getInNodes()) {
+                for (String remoteAddress : remoteAddresses) {
+                    String targetIp = extractIpFromAddress(remoteAddress);
+                    int targetPort = extractPortFromAddress(remoteAddress);
+                    if (targetIp == null || targetPort == -1) {
+                        return R.err("无法解析目标地址: " + remoteAddress);
+                    }
 
-                DiagnosisResult result = performTcpPingDiagnosis(inNode, targetIp, targetPort, "转发->目标");
-                results.add(result);
+                    DiagnosisResult result = performTcpPingDiagnosis(inNode, targetIp, targetPort, "转发->目标");
+                    results.add(result);
+                }
             }
         } else {
-            // 隧道转发：入口TCP ping出口，出口TCP ping目标
-            Node outNode = nodeService.getNodeById(tunnel.getOutNodeId());
-            if (outNode == null) {
-                return R.err("出口节点不存在");
-            }
-
-            // 入口TCP ping出口（使用转发的出口端口）
-            DiagnosisResult inToOutResult = performTcpPingDiagnosis(inNode, outNode.getServerIp(), forward.getOutPort(), "入口->出口");
-            results.add(inToOutResult);
-
-            // 出口TCP ping目标
-            for (String remoteAddress : remoteAddresses) {
-                // 提取IP和端口
-                String targetIp = extractIpFromAddress(remoteAddress);
-                int targetPort = extractPortFromAddress(remoteAddress);
-                if (targetIp == null || targetPort == -1) {
-                    return R.err("无法解析目标地址: " + remoteAddress);
+            // 隧道转发：每个入口检查到每个出口，每个出口检查目标。
+            for (Node inNode : nodeInfo.getInNodes()) {
+                for (Node outNode : nodeInfo.getOutNodes()) {
+                    DiagnosisResult inToOutResult = performTcpPingDiagnosis(inNode, firstNodeAddress(outNode), forward.getOutPort(), "入口->出口");
+                    results.add(inToOutResult);
                 }
-                DiagnosisResult outToTargetResult = performTcpPingDiagnosis(outNode, targetIp, targetPort, "出口->目标");
-                results.add(outToTargetResult);
             }
 
+            for (Node outNode : nodeInfo.getOutNodes()) {
+                for (String remoteAddress : remoteAddresses) {
+                    String targetIp = extractIpFromAddress(remoteAddress);
+                    int targetPort = extractPortFromAddress(remoteAddress);
+                    if (targetIp == null || targetPort == -1) {
+                        return R.err("无法解析目标地址: " + remoteAddress);
+                    }
+                    DiagnosisResult outToTargetResult = performTcpPingDiagnosis(outNode, targetIp, targetPort, "出口->目标");
+                    results.add(outToTargetResult);
+                }
+            }
         }
 
         // 7. 构建诊断报告
@@ -1082,13 +1117,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 创建Forward实体对象
      */
-    private Forward createForwardEntity(ForwardDto forwardDto, UserInfo currentUser, PortAllocation portAllocation) {
+    private Forward createForwardEntity(ForwardDto forwardDto, Tunnel tunnel, UserInfo currentUser, PortAllocation portAllocation) {
         Forward forward = new Forward();
         // 先复制DTO的属性，再设置其他属性，避免被覆盖
         BeanUtils.copyProperties(forwardDto, forward);
         forward.setStatus(FORWARD_STATUS_ACTIVE);
         forward.setInPort(portAllocation.getInPort());
         forward.setOutPort(portAllocation.getOutPort());
+        forward.setStrategy(tunnelStrategy(tunnel));
         forward.setUserId(currentUser.getUserId());
         forward.setUserName(currentUser.getUserName());
         forward.setCreatedTime(System.currentTimeMillis());
@@ -1128,6 +1164,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forward.setOutPort(existForward.getOutPort());
         }
 
+        forward.setStrategy(tunnelStrategy(tunnel));
         forward.setUpdatedTime(System.currentTimeMillis());
         return forward;
     }
@@ -1138,18 +1175,19 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private R createGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel) {
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
+        String strategy = tunnelStrategy(tunnel);
 
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             String chainRemoteAddr = buildNodeRemoteAddr(nodeInfo.getOutNodes(), forward.getOutPort());
             for (Node inNode : nodeInfo.getInNodes()) {
-                R chainResult = createChainService(inNode, serviceName, chainRemoteAddr, tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy());
+                R chainResult = createChainService(inNode, serviceName, chainRemoteAddr, tunnel.getProtocol(), tunnel.getInterfaceName(), strategy);
                 if (chainResult.getCode() != 0) {
                     cleanupGostServices(serviceName, nodeInfo, tunnel.getType());
                     return chainResult;
                 }
             }
             for (Node outNode : nodeInfo.getOutNodes()) {
-                R remoteResult = createRemoteService(outNode, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName());
+                R remoteResult = createRemoteService(outNode, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName(), strategy);
                 if (remoteResult.getCode() != 0) {
                     cleanupGostServices(serviceName, nodeInfo, tunnel.getType());
                     return remoteResult;
@@ -1158,7 +1196,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         for (Node inNode : nodeInfo.getInNodes()) {
-            R serviceResult = createMainService(inNode, serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
+            R serviceResult = createMainService(inNode, serviceName, forward, limiter, tunnel.getType(), tunnel, strategy, interfaceName);
             if (serviceResult.getCode() != 0) {
                 cleanupGostServices(serviceName, nodeInfo, tunnel.getType());
                 return serviceResult;
@@ -1173,18 +1211,19 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel) {
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
+        String strategy = tunnelStrategy(tunnel);
 
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             String chainRemoteAddr = buildNodeRemoteAddr(nodeInfo.getOutNodes(), forward.getOutPort());
             for (Node inNode : nodeInfo.getInNodes()) {
-                R chainResult = updateChainService(inNode, serviceName, chainRemoteAddr, tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy());
+                R chainResult = updateChainService(inNode, serviceName, chainRemoteAddr, tunnel.getProtocol(), tunnel.getInterfaceName(), strategy);
                 if (chainResult.getCode() != 0) {
                     updateForwardStatusToError(forward);
                     return chainResult;
                 }
             }
             for (Node outNode : nodeInfo.getOutNodes()) {
-                R remoteResult = updateRemoteService(outNode, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName());
+                R remoteResult = updateRemoteService(outNode, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName(), strategy);
                 if (remoteResult.getCode() != 0) {
                     updateForwardStatusToError(forward);
                     return remoteResult;
@@ -1192,7 +1231,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
         }
         for (Node inNode : nodeInfo.getInNodes()) {
-            R serviceResult = updateMainService(inNode, serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
+            R serviceResult = updateMainService(inNode, serviceName, forward, limiter, tunnel.getType(), tunnel, strategy, interfaceName);
             if (serviceResult.getCode() != 0) {
                 updateForwardStatusToError(forward);
                 return serviceResult;
@@ -1294,8 +1333,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 创建远程服务
      */
-    private R createRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName) {
-        GostDto result = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, forward.getStrategy(), interfaceName);
+    private R createRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName, String strategy) {
+        GostDto result = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, strategy, interfaceName);
         return isGostOperationSuccess(result) ? R.ok() : R.err(result.getMsg());
     }
 
@@ -1321,11 +1360,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 更新远程服务
      */
-    private R updateRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName) {
+    private R updateRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName, String strategy) {
         // 创建新远程服务
-        GostDto createResult = GostUtil.UpdateRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, forward.getStrategy(), interfaceName);
+        GostDto createResult = GostUtil.UpdateRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, strategy, interfaceName);
         if (createResult.getMsg().contains(GOST_NOT_FOUND_MSG)) {
-            createResult = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, forward.getStrategy(), interfaceName);
+            createResult = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, strategy, interfaceName);
         }
         return isGostOperationSuccess(createResult) ? R.ok() : R.err(createResult.getMsg());
     }
@@ -1376,6 +1415,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     private boolean isGostNotFound(GostDto gostResult) {
         return gostResult.getMsg() != null && gostResult.getMsg().contains(GOST_NOT_FOUND_MSG);
+    }
+
+    private String tunnelStrategy(Tunnel tunnel) {
+        String strategy = tunnel == null ? null : tunnel.getStrategy();
+        return strategy == null || strategy.trim().isEmpty() ? DEFAULT_STRATEGY : strategy.trim().toLowerCase(Locale.ROOT);
     }
 
     private String buildNodeRemoteAddr(List<Node> nodes, Integer port) {

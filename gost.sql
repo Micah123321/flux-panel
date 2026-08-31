@@ -162,6 +162,7 @@ CREATE TABLE `tunnel` (
   `out_ip` varchar(100) NOT NULL,
   `type` int(10) NOT NULL,
   `protocol` varchar(10) NOT NULL DEFAULT 'tls',
+  `strategy` varchar(100) NOT NULL DEFAULT 'round',
   `flow` int(10) NOT NULL,
   `tcp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',
   `udp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',

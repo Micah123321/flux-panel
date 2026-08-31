@@ -85,6 +85,12 @@ public class ForwardWithTunnelDto {
 
     private String strategy;
 
+    private String tunnelStrategy;
+
+    private String entryNodeNames;
+
+    private Integer entryNodeCount;
+
     private Integer inx;
 
     private String interfaceName;

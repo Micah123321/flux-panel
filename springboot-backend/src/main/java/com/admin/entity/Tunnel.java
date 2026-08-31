@@ -69,6 +69,11 @@ public class Tunnel extends BaseEntity {
     private String protocol;
 
     /**
+     * 节点组调度策略：fifo/round/rand/hash
+     */
+    private String strategy;
+
+    /**
      * 流量倍率
      */
     private BigDecimal trafficRatio;

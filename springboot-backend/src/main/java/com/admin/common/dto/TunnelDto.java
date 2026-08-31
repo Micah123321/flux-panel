@@ -40,6 +40,9 @@ public class TunnelDto {
     
     // 协议类型，默认为tls
     private String protocol;
+
+    // 节点组调度策略，默认为fifo
+    private String strategy;
     
     // TCP监听地址，默认为0.0.0.0
     private String tcpListenAddr = "0.0.0.0";

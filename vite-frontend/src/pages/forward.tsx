@@ -55,6 +55,9 @@ interface Forward {
   tunnelId: number;
   tunnelName: string;
   inIp: string;
+  entryNodeNames?: string;
+  entryNodeCount?: number;
+  tunnelStrategy?: string;
   inPort: number;
   remoteAddr: string;
   interfaceName?: string;
@@ -693,8 +696,6 @@ export default function ForwardPage() {
         .filter(addr => addr)
         .join(',');
 
-      const addressCount = processedRemoteAddr.split(',').length;
-
       let res;
       if (isEdit) {
         // 更新时确保包含必要字段
@@ -705,8 +706,7 @@ export default function ForwardPage() {
           tunnelId: form.tunnelId,
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
-          interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          interfaceName: form.interfaceName
         };
         res = await updateForward(updateData);
       } else {
@@ -716,8 +716,7 @@ export default function ForwardPage() {
           tunnelId: form.tunnelId,
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
-          interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          interfaceName: form.interfaceName
         };
         res = await createForward(createData);
       }
@@ -857,30 +856,23 @@ export default function ForwardPage() {
     return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   };
 
+  const splitAddresses = (addressString: string): string[] =>
+    addressString.split(/[\n,]+/).map(addr => addr.trim()).filter(Boolean);
+
   // 格式化入口地址
   const formatInAddress = (ipString: string, port: number): string => {
     if (!ipString || !port) return '';
 
-    const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
+    const ips = splitAddresses(ipString);
     if (ips.length === 0) return '';
 
     if (ips.length === 1) {
       const ip = ips[0];
-      if (ip.includes(':') && !ip.startsWith('[')) {
-        return `[${ip}]:${port}`;
-      } else {
-        return `${ip}:${port}`;
-      }
+      return ip.includes(':') && !ip.startsWith('[') ? `[${ip}]:${port}` : `${ip}:${port}`;
     }
 
     const firstIp = ips[0];
-    let formattedFirstIp;
-    if (firstIp.includes(':') && !firstIp.startsWith('[')) {
-      formattedFirstIp = `[${firstIp}]`;
-    } else {
-      formattedFirstIp = firstIp;
-    }
-
+    const formattedFirstIp = firstIp.includes(':') && !firstIp.startsWith('[') ? `[${firstIp}]` : firstIp;
     return `${formattedFirstIp}:${port} (+${ips.length - 1})`;
   };
 
@@ -888,7 +880,7 @@ export default function ForwardPage() {
   const formatRemoteAddress = (addressString: string): string => {
     if (!addressString) return '';
 
-    const addresses = addressString.split(',').map(addr => addr.trim()).filter(addr => addr);
+    const addresses = splitAddresses(addressString);
     if (addresses.length === 0) return '';
     if (addresses.length === 1) return addresses[0];
 
@@ -898,8 +890,7 @@ export default function ForwardPage() {
   // 检查是否有多个地址
   const hasMultipleAddresses = (addressString: string): boolean => {
     if (!addressString) return false;
-    const addresses = addressString.split(',').map(addr => addr.trim()).filter(addr => addr);
-    return addresses.length > 1;
+    return splitAddresses(addressString).length > 1;
   };
 
   // 显示地址列表弹窗
@@ -909,7 +900,7 @@ export default function ForwardPage() {
     let addresses: string[];
     if (port !== null) {
       // 入口地址处理
-      const ips = addressString.split(',').map(ip => ip.trim()).filter(ip => ip);
+      const ips = splitAddresses(addressString);
       if (ips.length <= 1) {
         copyToClipboard(formatInAddress(addressString, port), title);
         return;
@@ -923,7 +914,7 @@ export default function ForwardPage() {
       });
     } else {
       // 远程地址处理
-      addresses = addressString.split(',').map(addr => addr.trim()).filter(addr => addr);
+      addresses = splitAddresses(addressString);
       if (addresses.length <= 1) {
         copyToClipboard(addressString, title);
         return;
@@ -1224,13 +1215,6 @@ export default function ForwardPage() {
       default:
         return { color: 'default', text: '未知' };
     }
-  };
-
-  // 获取地址数量
-  const getAddressCount = (addressString: string): number => {
-    if (!addressString) return 0;
-    const addresses = addressString.split('\n').map(addr => addr.trim()).filter(addr => addr);
-    return addresses.length;
   };
 
   // 处理拖拽结束
@@ -1916,24 +1900,7 @@ export default function ForwardPage() {
                       description="用于多IP服务器指定使用那个IP请求远程地址，不懂的默认为空就行"
                     />
 
-                    {getAddressCount(form.remoteAddr) > 1 && (
-                      <Select
-                        label="负载策略"
-                        placeholder="请选择负载均衡策略"
-                        selectedKeys={[form.strategy]}
-                        onSelectionChange={(keys) => {
-                          const selectedKey = Array.from(keys)[0] as string;
-                          setForm(prev => ({ ...prev, strategy: selectedKey }));
-                        }}
-                        variant="bordered"
-                        description="多个目标地址的负载均衡策略"
-                      >
-                        <SelectItem key="fifo" >主备模式 - 自上而下</SelectItem>
-                        <SelectItem key="round" >轮询模式 - 依次轮换</SelectItem>
-                        <SelectItem key="rand" >随机模式 - 随机选择</SelectItem>
-                        <SelectItem key="hash" >哈希模式 - IP哈希</SelectItem>
-                      </Select>
-                    )}
+
                   </div>
                 </ModalBody>
                 <ModalFooter>

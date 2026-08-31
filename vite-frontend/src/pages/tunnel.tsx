@@ -35,6 +35,7 @@ interface Tunnel {
   inIp: string;
   outIp?: string;
   protocol?: string;
+  strategy?: string;
   tcpListenAddr: string;
   udpListenAddr: string;
   interfaceName?: string;
@@ -78,6 +79,7 @@ interface TunnelForm {
   inGroupId?: number | null;
   outGroupId?: number | null;
   protocol: string;
+  strategy: string;
   tcpListenAddr: string;
   udpListenAddr: string;
   interfaceName?: string;
@@ -132,6 +134,7 @@ export default function TunnelPage() {
     inGroupId: null,
     outGroupId: null,
     protocol: 'tls',
+    strategy: 'round',
     tcpListenAddr: '[::]',
     udpListenAddr: '[::]',
     interfaceName: '',
@@ -281,6 +284,7 @@ export default function TunnelPage() {
       inGroupId: null,
       outGroupId: null,
       protocol: 'tls',
+      strategy: 'round',
       tcpListenAddr: '[::]',
       udpListenAddr: '[::]',
       interfaceName: '',
@@ -304,6 +308,7 @@ export default function TunnelPage() {
       inGroupId: tunnel.inGroupId || null,
       outGroupId: tunnel.outGroupId || null,
       protocol: tunnel.protocol || 'tls',
+      strategy: tunnel.strategy || 'round',
       tcpListenAddr: tunnel.tcpListenAddr || '[::]',
       udpListenAddr: tunnel.udpListenAddr || '[::]',
       interfaceName: tunnel.interfaceName || '',
@@ -499,6 +504,21 @@ export default function TunnelPage() {
     }
   };
 
+  const getStrategyDisplay = (strategy?: string) => {
+    switch (strategy || 'round') {
+      case 'fifo':
+        return { text: '主备', color: 'primary' };
+      case 'round':
+        return { text: '轮询', color: 'success' };
+      case 'rand':
+        return { text: '随机', color: 'warning' };
+      case 'hash':
+        return { text: '哈希', color: 'secondary' };
+      default:
+        return { text: '轮询', color: 'success' };
+    }
+  };
+
 
   // 获取连接质量
   const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
@@ -563,6 +583,7 @@ export default function TunnelPage() {
             {tunnels.map((tunnel) => {
               const statusDisplay = getStatusDisplay(tunnel.status);
               const typeDisplay = getTypeDisplay(tunnel.type);
+              const strategyDisplay = getStrategyDisplay(tunnel.strategy);
               
               return (
                 <Card key={tunnel.id} className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
@@ -638,12 +659,15 @@ export default function TunnelPage() {
                       </div>
 
                       {/* 配置信息 */}
-                      <div className="flex justify-between items-center pt-2 border-t border-divider">
+                      <div className="flex justify-between items-center gap-2 pt-2 border-t border-divider">
                         <div className="text-left">
                           <div className="text-xs font-medium text-foreground">
                             {getFlowDisplay(tunnel.flow)}
                           </div>
                         </div>
+                        <Chip color={strategyDisplay.color as any} variant="flat" size="sm" className="text-xs">
+                          {strategyDisplay.text}
+                        </Chip>
                         <div className="text-right">
                           <div className="text-xs font-medium text-foreground">
                             {tunnel.trafficRatio}x
@@ -773,7 +797,7 @@ export default function TunnelPage() {
                       <SelectItem key="2">隧道转发</SelectItem>
                     </Select>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <Select
                         label="流量计算"
                         placeholder="请选择流量计算方式"
@@ -810,6 +834,24 @@ export default function TunnelPage() {
                           </div>
                         }
                       />
+
+                      <Select
+                        label="负载策略"
+                        placeholder="请选择负载策略"
+                        selectedKeys={[form.strategy]}
+                        onSelectionChange={(keys) => {
+                          const selectedKey = Array.from(keys)[0] as string;
+                          if (selectedKey) {
+                            setForm(prev => ({ ...prev, strategy: selectedKey }));
+                          }
+                        }}
+                        variant="bordered"
+                      >
+                        <SelectItem key="round">轮询</SelectItem>
+                        <SelectItem key="fifo">主备</SelectItem>
+                        <SelectItem key="rand">随机</SelectItem>
+                        <SelectItem key="hash">哈希</SelectItem>
+                      </Select>
                     </div>
 
                     <Divider />
