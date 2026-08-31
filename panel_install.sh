@@ -1031,6 +1031,41 @@ UPDATE \`forward\`
 SET \`inx\` = 0
 WHERE \`inx\` IS NULL;
 
+-- forward 表：添加每日流量计数字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'forward'
+        AND column_name = 'daily_in_flow'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`daily_in_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用入站流量(字节)" AFTER \`out_flow\`; ',
+    'SELECT "Column \`daily_in_flow\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'forward'
+        AND column_name = 'daily_out_flow'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`daily_out_flow\` BIGINT(20) NOT NULL DEFAULT 0 COMMENT "今日已用出站流量(字节)" AFTER \`daily_in_flow\`; ',
+    'SELECT "Column \`daily_out_flow\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- tunnel 表：添加 interface_name 字段（如果不存在）
 SET @sql = (
   SELECT IF(

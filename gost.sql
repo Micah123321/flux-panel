@@ -40,6 +40,8 @@ CREATE TABLE `forward` (
   `interface_name` varchar(200) DEFAULT NULL,
   `in_flow` bigint(20) NOT NULL DEFAULT '0',
   `out_flow` bigint(20) NOT NULL DEFAULT '0',
+  `daily_in_flow` bigint(20) NOT NULL DEFAULT '0' COMMENT '今日已用入站流量(字节)',
+  `daily_out_flow` bigint(20) NOT NULL DEFAULT '0' COMMENT '今日已用出站流量(字节)',
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) NOT NULL,
   `status` int(10) NOT NULL,
