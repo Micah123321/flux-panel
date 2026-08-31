@@ -31,7 +31,7 @@ public class TunnelUpdateDto {
     @NotBlank
     private String protocol;
 
-    // 节点组调度策略，默认为fifo
+    // 节点组调度策略，默认为round
     private String strategy;
 
     // TCP监听地址
