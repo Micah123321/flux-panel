@@ -1041,6 +1041,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     /**
      * 获取所需的节点信息
+     */
     private NodeInfo getRequiredNodes(Tunnel tunnel) {
         List<Node> inNodes = resolveTunnelNodes(tunnel.getInGroupId(), tunnel.getInNodeId());
         if (inNodes.isEmpty()) {
@@ -1098,7 +1099,6 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         Node node = nodeService.getNodeById(nodeId);
         return node == null ? Collections.emptyList() : Collections.singletonList(node);
-    }
     }
 
     /**
