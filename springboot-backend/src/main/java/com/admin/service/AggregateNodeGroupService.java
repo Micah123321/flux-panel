@@ -17,5 +17,9 @@ public interface AggregateNodeGroupService extends IService<AggregateNodeGroup> 
 
     R listGroups();
 
+    R pruneOfflineNodes(Long groupId);
+
+    R pruneOfflineNode(Long nodeId);
+
     List<Long> parseNodeIds(AggregateNodeGroup group);
 }

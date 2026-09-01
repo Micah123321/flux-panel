@@ -12,7 +12,9 @@ const forwardServiceInterface = read('springboot-backend/src/main/java/com/admin
 const aggregateServiceInterface = read('springboot-backend/src/main/java/com/admin/service/AggregateForwardService.java');
 const tunnelDto = read('springboot-backend/src/main/java/com/admin/common/dto/TunnelDto.java');
 const tunnelEntity = read('springboot-backend/src/main/java/com/admin/entity/Tunnel.java');
+const tunnelService = read('springboot-backend/src/main/java/com/admin/service/impl/TunnelServiceImpl.java');
 const forwardService = read('springboot-backend/src/main/java/com/admin/service/impl/ForwardServiceImpl.java');
+const webSocketServer = read('springboot-backend/src/main/java/com/admin/common/utils/WebSocketServer.java');
 const nodeSocket = read('go-gost/x/socket/websocket_reporter.go');
 const panelInstall = read('panel_install.sh');
 const gostSql = read('gost.sql');
@@ -26,6 +28,11 @@ assert.doesNotMatch(groupService, /不能修改成员/, '节点组成员不应�
 assert.match(groupService, /refreshReferencedTunnelPrimaryNodes/, '节点组成员更新后未刷新隧道兼容首节点');
 assert.match(groupService, /forwardService\.syncNodeGroupForwards/, '节点组成员更新后未同步普通转发');
 assert.match(groupService, /aggregateForwardService\.syncNodeGroupForwards/, '节点组成员更新后未同步历史聚合转发');
+assert.match(groupService, /pruneOfflineNodes/, '节点组服务缺少离线成员自动剔除');
+assert.match(groupService, /listGroups\(\)[\s\S]*pruneOfflineNodes/, '节点组列表未自动剔除离线成员');
+assert.match(groupService, /removedNodeNames/, '节点组离线剔除未返回被移除节点信息');
+assert.match(groupService, /tunnel\.setInNodeId\(primaryNode == null \? null : primaryNode\.getId\(\)\)/, '节点组清空时未移除入口兼容节点');
+assert.match(groupService, /tunnel\.setOutNodeId\(primaryNode == null \? null : primaryNode\.getId\(\)\)/, '节点组清空时未移除出口兼容节点');
 
 assert.doesNotMatch(aggregatePage, /新增聚合转发|转发规则|createAggregateForward|getAggregateForwards|MAX_PORT_SPAN/, '聚合页仍暴露独立聚合转发规则入口');
 assert.match(aggregatePage, /新增节点组/, '聚合页应保留节点组创建入口');
@@ -68,8 +75,15 @@ assert.doesNotMatch(forwardService, /forward\.getStrategy\(\)/, 'GOST 下发不�
 assert.match(forwardServiceInterface, /syncNodeGroupForwards/, '普通转发服务缺少节点组动态同步接口');
 assert.match(forwardService, /deleteRemovedGroupNodeServices/, '普通转发同步未清理移除节点服务');
 assert.match(forwardService, /updateGostServices\(forward, tunnel/, '普通转发同步未更新当前节点服务');
+assert.match(forwardService, /aggregateNodeGroupService\.pruneOfflineNodes/, '普通转发解析节点组前未自动剔除离线成员');
+assert.match(forwardService, /入口节点组没有在线节点/, '普通转发节点组全离线时缺少准确错误');
+assert.match(forwardService, /removedNode\.getStatus\(\) != NODE_STATUS_ONLINE/, '普通转发同步不应向离线移除节点发送删除命令');
+assert.match(tunnelService, /aggregateNodeGroupService\.pruneOfflineNodes/, '隧道创建解析节点组前未自动剔除离线成员');
+assert.doesNotMatch(tunnelService, /包含离线节点/, '隧道节点组不应因单个离线成员阻断');
+assert.match(webSocketServer, /pruneOfflineNode\(nodeId\)/, '节点离线事件未自动从节点组剔除');
 assert.match(aggregateServiceInterface, /syncNodeGroupForwards/, '历史聚合转发服务缺少节点组动态同步接口');
 assert.match(aggregateService, /deleteRemovedEntryServices/, '历史聚合转发同步未清理移除入口节点服务');
 assert.match(aggregateService, /updateForwardServices/, '历史聚合转发同步未更新当前入口节点服务');
+assert.match(aggregateService, /removedNode\.getStatus\(\).*STATUS_ACTIVE/, '历史聚合转发同步不应向离线移除节点发送删除命令');
 
 console.log('aggregate-forward corrected model check passed');

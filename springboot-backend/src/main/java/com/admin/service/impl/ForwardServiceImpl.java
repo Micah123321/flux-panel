@@ -47,6 +47,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int FORWARD_STATUS_PAUSED = 0;
     private static final int FORWARD_STATUS_ERROR = -1;
     private static final int TUNNEL_STATUS_ACTIVE = 1;
+    private static final int NODE_STATUS_ONLINE = 1;
     private static final String DEFAULT_STRATEGY = "round";
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
@@ -84,30 +85,28 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (tunnel.getStatus() != TUNNEL_STATUS_ACTIVE) {
             return R.err("隧道已禁用，无法创建转发");
         }
-
         // 3. 普通用户权限和限制检查
         UserPermissionResult permissionResult = checkUserPermissions(currentUser, tunnel, null);
         if (permissionResult.isHasError()) {
             return R.err(permissionResult.getErrorMessage());
         }
 
-        // 4. 分配端口
+        // 4. 获取所需节点；节点组会先自动剔除离线成员。
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
+        }
+
+        // 5. 分配端口
         PortAllocation portAllocation = allocatePorts(tunnel, forwardDto.getInPort());
         if (portAllocation.isHasError()) {
             return R.err(portAllocation.getErrorMessage());
         }
 
-        // 5. 创建并保存Forward对象
+        // 6. 创建并保存Forward对象
         Forward forward = createForwardEntity(forwardDto, tunnel, currentUser, portAllocation);
         if (!this.save(forward)) {
             return R.err("端口转发创建失败");
-        }
-
-        // 6. 获取所需的节点信息
-        NodeInfo nodeInfo = getRequiredNodes(tunnel);
-        if (nodeInfo.isHasError()) {
-            this.removeById(forward.getId());
-            return R.err(nodeInfo.getErrorMessage());
         }
 
         // 7. 调用Gost服务创建转发
@@ -117,9 +116,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             this.removeById(forward.getId());
             return gostResult;
         }
-
         return R.ok();
     }
+
 
     @Override
     public R createForwards(List<ForwardDto> forwards) {
@@ -341,14 +340,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             userTunnel = getUserTunnel(existForward.getUserId(), tunnel.getId().intValue());
         }
 
-        // 6. 更新Forward对象
-        Forward updatedForward = updateForwardEntity(forwardUpdateDto, existForward, tunnel);
-
-        // 7. 获取所需的节点信息
+        // 6. 获取所需节点；节点组会先自动剔除离线成员。
         NodeInfo nodeInfo = getRequiredNodes(tunnel);
         if (nodeInfo.isHasError()) {
             return R.err(nodeInfo.getErrorMessage());
         }
+
+        // 7. 更新Forward对象
+        Forward updatedForward = updateForwardEntity(forwardUpdateDto, existForward, tunnel);
 
         // 8. 调用Gost服务更新转发
         R gostResult;
@@ -554,6 +553,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         boolean outGroupChanged = Objects.equals(tunnel.getOutGroupId(), groupId);
         if (entryGroupChanged) {
             for (Node removedNode : removedNodes) {
+                if (removedNode.getStatus() != NODE_STATUS_ONLINE) {
+                    continue;
+                }
                 GostDto serviceResult = GostUtil.DeleteService(removedNode.getId(), serviceName);
                 if (!isGostOperationSuccess(serviceResult) && !isGostNotFound(serviceResult)) {
                     return R.err(serviceResult.getMsg());
@@ -567,16 +569,17 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
         }
         if (outGroupChanged && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+        if (outGroupChanged && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             for (Node removedNode : removedNodes) {
+                if (removedNode.getStatus() != NODE_STATUS_ONLINE) {
+                    continue;
+                }
                 GostDto remoteResult = GostUtil.DeleteRemoteService(removedNode.getId(), serviceName);
                 if (!isGostOperationSuccess(remoteResult) && !isGostNotFound(remoteResult)) {
                     return R.err(remoteResult.getMsg());
                 }
             }
         }
-        return R.ok();
-    }
-
     private List<Long> removedNodeIds(List<Long> oldNodeIds, List<Long> newNodeIds) {
         Set<Long> newSet = new HashSet<>(newNodeIds == null ? Collections.emptyList() : newNodeIds);
         List<Long> removed = new ArrayList<>();
@@ -1036,15 +1039,16 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     /**
      * 获取所需的节点信息
-     */
     private NodeInfo getRequiredNodes(Tunnel tunnel) {
         List<Node> inNodes = resolveTunnelNodes(tunnel.getInGroupId(), tunnel.getInNodeId());
         if (inNodes.isEmpty()) {
-            return NodeInfo.error("入口节点不存在");
+            return NodeInfo.error(tunnel.getInGroupId() == null ? "入口节点不存在" : "入口节点组没有在线节点");
         }
-        for (Node node : inNodes) {
-            if (node.getStatus() != 1) {
-                return NodeInfo.error("入口节点离线: " + node.getName());
+        if (tunnel.getInGroupId() == null) {
+            for (Node node : inNodes) {
+                if (node.getStatus() != NODE_STATUS_ONLINE) {
+                    return NodeInfo.error("入口节点离线: " + node.getName());
+                }
             }
         }
 
@@ -1052,11 +1056,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             outNodes = resolveTunnelNodes(tunnel.getOutGroupId(), tunnel.getOutNodeId());
             if (outNodes.isEmpty()) {
-                return NodeInfo.error("出口节点不存在");
+                return NodeInfo.error(tunnel.getOutGroupId() == null ? "出口节点不存在" : "出口节点组没有在线节点");
             }
-            for (Node node : outNodes) {
-                if (node.getStatus() != 1) {
-                    return NodeInfo.error("出口节点离线: " + node.getName());
+            if (tunnel.getOutGroupId() == null) {
+                for (Node node : outNodes) {
+                    if (node.getStatus() != NODE_STATUS_ONLINE) {
+                        return NodeInfo.error("出口节点离线: " + node.getName());
+                    }
                 }
             }
         }
@@ -1066,6 +1072,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     private List<Node> resolveTunnelNodes(Long groupId, Long nodeId) {
         if (groupId != null) {
+            R pruneResult = aggregateNodeGroupService.pruneOfflineNodes(groupId);
+            if (pruneResult.getCode() != 0) {
+                log.warn("自动清理节点组{}离线成员失败: {}", groupId, pruneResult.getMsg());
+            }
             AggregateNodeGroup group = aggregateNodeGroupService.getById(groupId);
             if (group == null) {
                 return Collections.emptyList();
@@ -1078,7 +1088,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             List<Node> nodes = new ArrayList<>();
             for (Long id : nodeIds) {
                 Node node = nodeMap.get(id);
-                if (node != null) {
+                if (node != null && node.getStatus() == NODE_STATUS_ONLINE) {
                     nodes.add(node);
                 }
             }
@@ -1086,6 +1096,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         Node node = nodeService.getNodeById(nodeId);
         return node == null ? Collections.emptyList() : Collections.singletonList(node);
+    }
     }
 
     /**

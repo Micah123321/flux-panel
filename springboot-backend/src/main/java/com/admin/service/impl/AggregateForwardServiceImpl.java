@@ -196,6 +196,9 @@ public class AggregateForwardServiceImpl extends ServiceImpl<AggregateForwardMap
     private R deleteRemovedEntryServices(AggregateForward forward, List<Node> removedNodes) {
         List<String> serviceNames = buildServiceNames(forward);
         for (Node removedNode : removedNodes) {
+            if (!Objects.equals(removedNode.getStatus(), STATUS_ACTIVE)) {
+                continue;
+            }
             R result = deleteServiceNames(removedNode, serviceNames);
             if (result.getCode() != 0) {
                 return result;

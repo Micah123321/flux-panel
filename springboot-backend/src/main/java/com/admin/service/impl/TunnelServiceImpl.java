@@ -365,13 +365,19 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     }
 
     private NodeSelection resolveGroupSelection(Long groupId, String label, boolean requireOnline) {
+        if (requireOnline) {
+            R pruneResult = aggregateNodeGroupService.pruneOfflineNodes(groupId);
+            if (pruneResult.getCode() != 0) {
+                return NodeSelection.error(pruneResult.getMsg());
+            }
+        }
         AggregateNodeGroup group = aggregateNodeGroupService.getById(groupId);
         if (group == null) {
             return NodeSelection.error(label + "不存在");
         }
         List<Long> nodeIds = aggregateNodeGroupService.parseNodeIds(group);
         if (nodeIds.isEmpty()) {
-            return NodeSelection.error(label + "没有可用节点");
+            return NodeSelection.error(requireOnline ? label + "没有在线节点" : label + "没有可用节点");
         }
         List<Node> nodes = nodeService.listByIds(nodeIds);
         Map<Long, Node> nodeMap = nodes.stream().collect(Collectors.toMap(Node::getId, node -> node));
@@ -379,12 +385,18 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         for (Long nodeId : nodeIds) {
             Node node = nodeMap.get(nodeId);
             if (node == null) {
+                if (requireOnline) {
+                    continue;
+                }
                 return NodeSelection.error(label + "包含不存在的节点");
             }
             if (requireOnline && node.getStatus() != NODE_STATUS_ONLINE) {
-                return NodeSelection.error(label + "包含离线节点: " + node.getName());
+                continue;
             }
             orderedNodes.add(node);
+        }
+        if (orderedNodes.isEmpty()) {
+            return NodeSelection.error(requireOnline ? label + "没有在线节点" : label + "没有可用节点");
         }
         return NodeSelection.success(orderedNodes);
     }

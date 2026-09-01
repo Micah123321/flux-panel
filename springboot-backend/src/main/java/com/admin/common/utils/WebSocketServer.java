@@ -3,8 +3,10 @@ package com.admin.common.utils;
 
 import com.admin.common.dto.GostConfigDto;
 import com.admin.common.dto.GostDto;
+import com.admin.common.lang.R;
 import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.entity.Node;
+import com.admin.service.AggregateNodeGroupService;
 import com.admin.service.NodeService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -30,6 +32,9 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     @Resource
     NodeService nodeService;
+
+    @Resource
+    AggregateNodeGroupService aggregateNodeGroupService;
 
     // 存储所有活跃的 WebSocket 连接（
     private static final CopyOnWriteArraySet<WebSocketSession> activeSessions = new CopyOnWriteArraySet<>();
@@ -345,7 +350,11 @@ public class WebSocketServer extends TextWebSocketHandler {
                         
                         if (updateResult) {
                             log.info("节点 {} 状态更新为离线成功", nodeId);
-                            
+                            R pruneResult = aggregateNodeGroupService.pruneOfflineNode(nodeId);
+                            if (pruneResult.getCode() != 0) {
+                                log.info("节点 {} 离线后清理节点组失败: {}", nodeId, pruneResult.getMsg());
+                            }
+
                             JSONObject res = new JSONObject();
                             res.put("id", id);
                             res.put("type", "status");
