@@ -569,7 +569,6 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
         }
         if (outGroupChanged && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-        if (outGroupChanged && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             for (Node removedNode : removedNodes) {
                 if (removedNode.getStatus() != NODE_STATUS_ONLINE) {
                     continue;
@@ -580,6 +579,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 }
             }
         }
+        return R.ok();
+    }
+
     private List<Long> removedNodeIds(List<Long> oldNodeIds, List<Long> newNodeIds) {
         Set<Long> newSet = new HashSet<>(newNodeIds == null ? Collections.emptyList() : newNodeIds);
         List<Long> removed = new ArrayList<>();
