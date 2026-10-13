@@ -249,7 +249,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             if (!inNodes.isEmpty()) {
                 dto.setEntryNodeCount(inNodes.size());
                 dto.setEntryNodeNames(inNodes.stream().map(Node::getName).collect(Collectors.joining("\n")));
-                dto.setInIp(inNodes.stream().map(this::firstNodeAddress).filter(addr -> !addr.isEmpty()).collect(Collectors.joining("\n")));
+                // 入口展示保留全部地址，服务器连接地址仅用于未配置入口地址时回退。
+                dto.setInIp(inNodes.stream()
+                        .map(node -> isBlank(node.getIp()) ? firstNodeAddress(node) : node.getIp().trim())
+                        .filter(addr -> !addr.isEmpty())
+                        .collect(Collectors.joining("\n")));
             }
         }
     }

@@ -416,7 +416,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         Node primaryInNode = inSelection.getPrimaryNode();
         tunnel.setInNodeId(primaryInNode.getId());
         tunnel.setInGroupId(tunnelDto.getInGroupId());
-        tunnel.setInIp(firstNodeAddress(primaryInNode));
+        tunnel.setInIp(StrUtil.isNotBlank(primaryInNode.getIp())
+                ? primaryInNode.getIp().trim() : firstNodeAddress(primaryInNode));
 
         // 设置流量计算类型
         tunnel.setFlow(tunnelDto.getFlow());

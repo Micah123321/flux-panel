@@ -329,6 +329,7 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
             primaryNode = nodeService.getById(nodeIds.get(0));
         }
         String primaryAddress = primaryNode == null ? null : firstNodeAddress(primaryNode);
+        String primaryEntryAddresses = primaryNode == null ? null : trimToNull(primaryNode.getIp());
         List<Tunnel> tunnels = tunnelMapper.selectList(new QueryWrapper<Tunnel>()
                 .and(wrapper -> wrapper.eq("in_group_id", groupId).or().eq("out_group_id", groupId)));
         long now = System.currentTimeMillis();
@@ -336,7 +337,7 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
             boolean changed = false;
             if (groupId.equals(tunnel.getInGroupId())) {
                 tunnel.setInNodeId(primaryNode == null ? null : primaryNode.getId());
-                tunnel.setInIp(primaryAddress);
+                tunnel.setInIp(primaryEntryAddresses == null ? primaryAddress : primaryEntryAddresses);
                 changed = true;
             }
             if (groupId.equals(tunnel.getOutGroupId())) {

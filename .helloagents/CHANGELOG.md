@@ -1,5 +1,9 @@
 # 变更记录
 
+## 2026-10-14
+
+- 修复新增 IPv6 入口后转发页面仍只显示服务器连接地址：转发列表、隧道创建和节点组首成员同步改为优先保留完整 `Node.ip` 列表，仅空入口地址回退 `serverIp`；出口拨号与探测地址继续使用服务器连接地址。验证：Java 21/Maven 3.9.6 后端 package 构建通过；实际后端类的 15 项代理桩回归通过，旧版相同检查复现入口列表被 serverIp 覆盖；实际转发页面函数的混合 IPv4/IPv6 列表、弹窗和复制检查通过；现有 aggregate_forward_ui_check.mjs 通过。临时工具与复现程序保存在 .cache/ipv6-entry-tools，未部署生产。
+
 ## 2026-08-31
 
 - 节点组离线成员改为自动剔除：`WebSocketServer` 在节点断开并置为离线后调用 `AggregateNodeGroupService.pruneOfflineNode()`，节点组列表、隧道节点组解析、普通转发节点组解析也会触发 `pruneOfflineNodes()` 清理历史离线成员。`ForwardServiceImpl` 对节点组只使用在线成员，节点组全离线时返回“入口节点组没有在线节点/出口节点组没有在线节点”，不再因单个离线成员报“入口节点离线: xxx”；离线 removed 节点不发送 WebSocket 删除命令，避免“节点不在线”阻断同步。`tests/aggregate_forward_ui_check.mjs` 增加离线剔除断言。
