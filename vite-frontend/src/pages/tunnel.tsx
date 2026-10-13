@@ -9,6 +9,7 @@ import { Spinner } from "@heroui/spinner";
 import { Divider } from "@heroui/divider";
 import { Alert } from "@heroui/alert";
 import toast from 'react-hot-toast';
+import { splitAddresses } from '@/utils/address';
 
 
 import { 
@@ -443,16 +444,7 @@ export default function TunnelPage() {
   };
 
   // 获取显示的IP（处理多IP）
-  const getDisplayIp = (ipString?: string): string => {
-    if (!ipString) return '-';
-    
-    const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
-    
-    if (ips.length === 0) return '-';
-    if (ips.length === 1) return ips[0];
-    
-    return `${ips[0]} 等${ips.length}个`;
-  };
+  const getDisplayIp = (ipString?: string): string => splitAddresses(ipString).join('\n') || '-';
 
   // 获取节点名称
   const getNodeName = (nodeId?: number): string => {
@@ -632,7 +624,7 @@ export default function TunnelPage() {
                           <code className="text-xs font-mono text-foreground block truncate">
                             {getEntryName(tunnel)}
                           </code>
-                          <code className="text-xs font-mono text-default-500 block truncate">
+                          <code className="text-xs font-mono text-default-500 block whitespace-pre-wrap break-all">
                             {getDisplayIp(tunnel.inIp)}
                           </code>
                         </div>
@@ -652,7 +644,7 @@ export default function TunnelPage() {
                           <code className="text-xs font-mono text-foreground block truncate">
                             {getExitName(tunnel)}
                           </code>
-                          <code className="text-xs font-mono text-default-500 block truncate">
+                          <code className="text-xs font-mono text-default-500 block whitespace-pre-wrap break-all">
                             {tunnel.type === 1 ? getDisplayIp(tunnel.inIp) : getDisplayIp(tunnel.outIp)}
                           </code>
                         </div>

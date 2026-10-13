@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { runTour } from '@/utils/tour';
+import { splitAddresses, formatAddressPort } from '@/utils/address';
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
@@ -856,24 +857,10 @@ export default function ForwardPage() {
     return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   };
 
-  const splitAddresses = (addressString: string): string[] =>
-    addressString.split(/[\n,]+/).map(addr => addr.trim()).filter(Boolean);
-
   // 格式化入口地址
   const formatInAddress = (ipString: string, port: number): string => {
     if (!ipString || !port) return '';
-
-    const ips = splitAddresses(ipString);
-    if (ips.length === 0) return '';
-
-    if (ips.length === 1) {
-      const ip = ips[0];
-      return ip.includes(':') && !ip.startsWith('[') ? `[${ip}]:${port}` : `${ip}:${port}`;
-    }
-
-    const firstIp = ips[0];
-    const formattedFirstIp = firstIp.includes(':') && !firstIp.startsWith('[') ? `[${firstIp}]` : firstIp;
-    return `${formattedFirstIp}:${port} (+${ips.length - 1})`;
+    return splitAddresses(ipString).map(ip => formatAddressPort(ip, port)).join('\n');
   };
 
   // 格式化远程地址
@@ -905,13 +892,7 @@ export default function ForwardPage() {
         copyToClipboard(formatInAddress(addressString, port), title);
         return;
       }
-      addresses = ips.map(ip => {
-        if (ip.includes(':') && !ip.startsWith('[')) {
-          return `[${ip}]:${port}`;
-        } else {
-          return `${ip}:${port}`;
-        }
-      });
+      addresses = ips.map(ip => formatAddressPort(ip, port));
     } else {
       // 远程地址处理
       addresses = splitAddresses(addressString);
@@ -1425,11 +1406,11 @@ export default function ForwardPage() {
                 onClick={() => showAddressModal(forward.inIp, forward.inPort, '入口端口')}
                 title={formatInAddress(forward.inIp, forward.inPort)}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="flex items-start gap-1.5 min-w-0 flex-1">
                     <span className="text-xs font-medium text-default-600 flex-shrink-0">入口:</span>
-                    <code className="text-xs font-mono text-foreground truncate min-w-0">
-                      {formatInAddress(forward.inIp, forward.inPort)}
+                    <code className="text-xs font-mono text-foreground whitespace-pre-wrap break-all min-w-0">
+                      {formatInAddress(forward.inIp, forward.inPort) || '-'}
                     </code>
                   </div>
                   {hasMultipleAddresses(forward.inIp) && (

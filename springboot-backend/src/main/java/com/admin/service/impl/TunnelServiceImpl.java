@@ -165,7 +165,16 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     @Override
     public R getAllTunnels() {
         List<Tunnel> tunnelList = this.list();
-        return R.ok(tunnelList);
+        Map<Long, AggregateNodeGroup> groups = loadTunnelGroups(tunnelList);
+        Map<Long, Node> nodes = loadEntryNodeMap(tunnelList, groups);
+        List<Tunnel> displayTunnels = new ArrayList<>();
+        for (Tunnel tunnel : tunnelList) {
+            Tunnel displayTunnel = new Tunnel();
+            BeanUtils.copyProperties(tunnel, displayTunnel);
+            displayTunnel.setInIp(entryAddresses(tunnel, entryNodes(tunnel, groups, nodes)));
+            displayTunnels.add(displayTunnel);
+        }
+        return R.ok(displayTunnels);
     }
 
     /**
@@ -695,9 +704,64 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @return 隧道DTO列表
      */
     private List<TunnelListDto> convertToTunnelListDtos(List<Tunnel> tunnelEntities) {
+        Map<Long, AggregateNodeGroup> groups = loadTunnelGroups(tunnelEntities);
+        Map<Long, Node> nodes = loadEntryNodeMap(tunnelEntities, groups);
         return tunnelEntities.stream()
-                .map(this::convertToTunnelListDto)
+                .map(tunnel -> convertToTunnelListDto(tunnel, groups, nodes))
                 .collect(Collectors.toList());
+    }
+
+    private Map<Long, AggregateNodeGroup> loadTunnelGroups(List<Tunnel> tunnels) {
+        Set<Long> groupIds = new LinkedHashSet<>();
+        for (Tunnel tunnel : tunnels) {
+            if (tunnel.getInGroupId() != null) {
+                groupIds.add(tunnel.getInGroupId());
+            }
+            if (tunnel.getOutGroupId() != null) {
+                groupIds.add(tunnel.getOutGroupId());
+            }
+        }
+        if (groupIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return aggregateNodeGroupService.listByIds(groupIds).stream()
+                .collect(Collectors.toMap(AggregateNodeGroup::getId, group -> group));
+    }
+
+    private Map<Long, Node> loadEntryNodeMap(List<Tunnel> tunnels, Map<Long, AggregateNodeGroup> groups) {
+        Set<Long> nodeIds = new LinkedHashSet<>();
+        for (Tunnel tunnel : tunnels) {
+            if (tunnel.getInNodeId() != null) {
+                nodeIds.add(tunnel.getInNodeId());
+            }
+            AggregateNodeGroup group = groups.get(tunnel.getInGroupId());
+            if (group != null) {
+                nodeIds.addAll(aggregateNodeGroupService.parseNodeIds(group));
+            }
+        }
+        if (nodeIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return nodeService.listByIds(nodeIds).stream()
+                .collect(Collectors.toMap(Node::getId, node -> node));
+    }
+
+    private List<Node> entryNodes(Tunnel tunnel, Map<Long, AggregateNodeGroup> groups, Map<Long, Node> nodes) {
+        AggregateNodeGroup group = groups.get(tunnel.getInGroupId());
+        List<Long> nodeIds = group == null ? Collections.singletonList(tunnel.getInNodeId())
+                : aggregateNodeGroupService.parseNodeIds(group);
+        return nodeIds.stream().map(nodes::get).filter(Objects::nonNull).collect(Collectors.toList());
+    }
+
+    private String entryAddresses(Tunnel tunnel, List<Node> nodes) {
+        // Display all entry addresses without changing persisted or outbound dialing values.
+        String addresses = nodes.stream()
+                .map(node -> StrUtil.isNotBlank(node.getIp()) ? node.getIp() : node.getServerIp())
+                .filter(StrUtil::isNotBlank)
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.joining(","));
+        return addresses.isEmpty() ? tunnel.getInIp() : addresses;
     }
 
     /**
@@ -706,30 +770,29 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @param tunnel 隧道实体
      * @return 隧道列表DTO
      */
-    private TunnelListDto convertToTunnelListDto(Tunnel tunnel) {
+    private TunnelListDto convertToTunnelListDto(Tunnel tunnel, Map<Long, AggregateNodeGroup> groups,
+                                                  Map<Long, Node> nodes) {
+        List<Node> inNodes = entryNodes(tunnel, groups, nodes);
         TunnelListDto dto = new TunnelListDto();
         dto.setId(tunnel.getId().intValue());
         dto.setName(tunnel.getName());
-        dto.setIp(tunnel.getInIp());
+        dto.setIp(entryAddresses(tunnel, inNodes));
         dto.setType(tunnel.getType());
         dto.setProtocol(tunnel.getProtocol());
         dto.setStrategy(normalizeStrategy(tunnel.getStrategy()));
 
         dto.setInGroupId(tunnel.getInGroupId());
         dto.setOutGroupId(tunnel.getOutGroupId());
-        if (tunnel.getInGroupId() != null) {
-            AggregateNodeGroup group = aggregateNodeGroupService.getById(tunnel.getInGroupId());
-            dto.setInGroupName(group == null ? null : group.getName());
-        }
-        if (tunnel.getOutGroupId() != null) {
-            AggregateNodeGroup group = aggregateNodeGroupService.getById(tunnel.getOutGroupId());
-            dto.setOutGroupName(group == null ? null : group.getName());
-        }
+        AggregateNodeGroup inGroup = groups.get(tunnel.getInGroupId());
+        AggregateNodeGroup outGroup = groups.get(tunnel.getOutGroupId());
+        dto.setInGroupName(inGroup == null ? null : inGroup.getName());
+        dto.setOutGroupName(outGroup == null ? null : outGroup.getName());
 
-        NodeSelection inSelection = resolveTunnelNodeSelection(tunnel.getInGroupId(), tunnel.getInNodeId(), "入口节点");
-        if (!inSelection.isHasError()) {
-            int start = inSelection.getNodes().stream().map(Node::getPortSta).max(Integer::compareTo).orElse(0);
-            int end = inSelection.getNodes().stream().map(Node::getPortEnd).min(Integer::compareTo).orElse(0);
+        boolean completeEntry = tunnel.getInGroupId() == null || (inGroup != null
+                && inNodes.size() == aggregateNodeGroupService.parseNodeIds(inGroup).size());
+        if (completeEntry && !inNodes.isEmpty()) {
+            int start = inNodes.stream().map(Node::getPortSta).max(Integer::compareTo).orElse(0);
+            int end = inNodes.stream().map(Node::getPortEnd).min(Integer::compareTo).orElse(0);
             dto.setInNodePortSta(start);
             dto.setInNodePortEnd(end);
         }
