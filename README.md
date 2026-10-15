@@ -38,7 +38,7 @@ curl -fL --retry 3 https://cghp2.535888.xyz/https://raw.githubusercontent.com/Mi
 
 面板的节点安装命令弹窗中可开启「国内加速」，生成的命令会自动携带 `-c`，同时加速安装脚本和脚本内部的 GitHub Release 下载。手动安装时可继续追加 `-a 主控地址 -s 节点密钥`；更新时执行 `./install.sh -c` 并选择更新。
 
-节点程序、进程及 systemd 服务统一命名为 `mi-flux-node`。重新安装或更新时自动迁移由旧脚本创建的 `gost.service`，保留 `/etc/gost` 下的主控和转发配置。服务管理命令为 `systemctl status mi-flux-node`，日志查看命令为 `journalctl -u mi-flux-node -f`。
+节点程序、进程及 systemd 服务统一命名为 `mi-flux-node`。安装目录统一为 `/etc/mi-flux-node`。重新安装或更新时，自动将旧 `/etc/gost` 目录中的主控和转发配置完整迁移到新目录，并刷新旧节点服务的工作目录和启动路径；启动失败时恢复原路径和服务。服务管理命令为 `systemctl status mi-flux-node`，日志查看命令为 `journalctl -u mi-flux-node -f`。
 
 #### 默认管理员账号
 

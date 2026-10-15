@@ -16,8 +16,8 @@ var (
 
 func init() {
 	v.SetConfigName("gost")
-	v.AddConfigPath("/etc/gost/")
-	v.AddConfigPath("$HOME/.gost/")
+	v.AddConfigPath("/etc/mi-flux-node/")
+	v.AddConfigPath("$HOME/.mi-flux-node/")
 	v.AddConfigPath(".")
 }
 

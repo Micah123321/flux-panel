@@ -30,8 +30,10 @@ build_download_url() {
 DOWNLOAD_URL=$(build_download_url)
 SERVICE_NAME="mi-flux-node"
 SERVICE_DIR="/etc/systemd/system"
-# 沿用配置目录以兼容已有节点和转发配置。
-INSTALL_DIR="/etc/gost"
+NODE_INSTALL_DIR="/etc/mi-flux-node"
+LEGACY_INSTALL_DIR="/etc/gost"
+INSTALL_DIR="$NODE_INSTALL_DIR"
+DIRECTORY_MIGRATED=false
 DOMESTIC_MODE=false
 GITHUB_PROXY="https://cghp2.535888.xyz/"
 
@@ -394,10 +396,78 @@ parse_args() {
   done
 }
 
+# 旧目录仅在迁移前作为配置来源；新装始终使用新目录。
+select_install_dir() {
+  INSTALL_DIR="$NODE_INSTALL_DIR"
+  if [[ -f "$LEGACY_INSTALL_DIR/config.json" &&
+    ( -f "$LEGACY_INSTALL_DIR/$SERVICE_NAME" || -f "$LEGACY_INSTALL_DIR/gost" ) ]]; then
+    if [[ -e "$NODE_INSTALL_DIR" ]]; then
+      echo "❌ 新旧安装目录同时存在，请先检查目录内容后重试。"
+      return 1
+    fi
+    INSTALL_DIR="$LEGACY_INSTALL_DIR"
+  fi
+}
+
+backup_directory_migration() {
+  [[ "$INSTALL_DIR" == "$LEGACY_INSTALL_DIR" ]] || return 0
+  local service
+  for service in "$SERVICE_NAME" gost; do
+    if [[ -f "$SERVICE_DIR/$service.service" ]] &&
+      grep -Fxq "WorkingDirectory=$LEGACY_INSTALL_DIR" "$SERVICE_DIR/$service.service"; then
+      cp -p "$SERVICE_DIR/$service.service" "$INSTALL_DIR/.migration-service" || return 1
+      echo "$service" > "$INSTALL_DIR/.migration-service-name"
+      break
+    fi
+  done
+  if [[ -f "$INSTALL_DIR/$SERVICE_NAME" ]]; then
+    cp -p "$INSTALL_DIR/$SERVICE_NAME" "$INSTALL_DIR/.migration-binary" || return 1
+  fi
+}
+
+relocate_install_dir() {
+  [[ "$INSTALL_DIR" == "$LEGACY_INSTALL_DIR" ]] || return 0
+  [[ ! -e "$NODE_INSTALL_DIR" ]] || return 1
+  mv -T "$LEGACY_INSTALL_DIR" "$NODE_INSTALL_DIR" || return 1
+  INSTALL_DIR="$NODE_INSTALL_DIR"
+  DIRECTORY_MIGRATED=true
+  echo "📁 安装目录已迁移: $INSTALL_DIR"
+}
+
+rollback_directory_migration() {
+  [[ "$DIRECTORY_MIGRATED" == true || -f "$INSTALL_DIR/.migration-service-name" ]] || return 0
+  local previous_service=""
+  if [[ -f "$INSTALL_DIR/.migration-service-name" ]]; then
+    previous_service=$(<"$INSTALL_DIR/.migration-service-name")
+  fi
+  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  if [[ -f "$INSTALL_DIR/.migration-binary" ]]; then
+    mv "$INSTALL_DIR/.migration-binary" "$INSTALL_DIR/$SERVICE_NAME" || return 1
+  fi
+  if [[ "$previous_service" != "$SERVICE_NAME" ]]; then
+    rm -f "$SERVICE_DIR/$SERVICE_NAME.service"
+  fi
+  if [[ -n "$previous_service" ]]; then
+    cp -p "$INSTALL_DIR/.migration-service" "$SERVICE_DIR/$previous_service.service" || return 1
+  fi
+  if [[ "$DIRECTORY_MIGRATED" == true ]]; then
+    mv -T "$INSTALL_DIR" "$LEGACY_INSTALL_DIR" || return 1
+    INSTALL_DIR="$LEGACY_INSTALL_DIR"
+    DIRECTORY_MIGRATED=false
+  fi
+  systemctl daemon-reload || return 1
+  if [[ -n "$previous_service" ]]; then
+    systemctl enable "$previous_service" || return 1
+    systemctl restart "$previous_service" || return 1
+  fi
+  echo "⚠️ 目录迁移未完成，已恢复原节点路径和服务。"
+}
+
 # 仅接管此脚本创建的旧服务，避免影响服务器上独立安装的 gost。
 is_legacy_node_service() {
   [[ -f "$SERVICE_DIR/gost.service" ]] &&
-    grep -Fxq "ExecStart=$INSTALL_DIR/gost" "$SERVICE_DIR/gost.service"
+    { grep -Fxq "ExecStart=$INSTALL_DIR/gost" "$SERVICE_DIR/gost.service" ||
+      grep -Fxq "ExecStart=$LEGACY_INSTALL_DIR/gost" "$SERVICE_DIR/gost.service"; }
 }
 
 stop_node_services() {
@@ -414,6 +484,8 @@ stop_node_services() {
 
 # 下载、验证成功后才停止现有节点并替换二进制。
 fetch_node_binary() {
+  select_install_dir || return 1
+  mkdir -p "$INSTALL_DIR" || return 1
   local binary="$INSTALL_DIR/$SERVICE_NAME"
   local pending="$binary.new"
   echo "⬇️ 下载 $SERVICE_NAME 中..."
@@ -426,25 +498,36 @@ fetch_node_binary() {
     rm -f "$pending"
     return 1
   fi
-  if ! stop_node_services; then
+  backup_directory_migration || return 1
+  if ! stop_node_services || ! relocate_install_dir; then
     rm -f "$pending"
+    rollback_directory_migration
     return 1
   fi
-  mv "$pending" "$binary" || return 1
+  binary="$INSTALL_DIR/$SERVICE_NAME"
+  pending="$binary.new"
+  if ! mv "$pending" "$binary"; then
+    rollback_directory_migration
+    return 1
+  fi
   echo "🔎 $SERVICE_NAME 版本：$NODE_VERSION"
 }
 
 # 创建/刷新 systemd 服务；配置文件保持原格式。
 setup_service() {
   local binary="$INSTALL_DIR/$SERVICE_NAME"
-  # 添加/移除主控时也支持从已有旧二进制迁移。
   if [[ ! -x "$binary" && -x "$INSTALL_DIR/gost" ]]; then
     cp -p "$INSTALL_DIR/gost" "$binary" || return 1
   fi
   [[ -x "$binary" ]] || return 1
-  stop_node_services || return 1
+  backup_directory_migration || return 1
+  if ! stop_node_services || ! relocate_install_dir; then
+    rollback_directory_migration
+    return 1
+  fi
+  binary="$INSTALL_DIR/$SERVICE_NAME"
   local service_file="$SERVICE_DIR/$SERVICE_NAME.service"
-  cat > "$service_file" <<EOF
+  if ! cat > "$service_file" <<EOF
 [Unit]
 Description=mi-flux-node
 After=network.target
@@ -457,20 +540,24 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-  [[ $? -eq 0 ]] || return 1
-
-  systemctl daemon-reload || return 1
-  systemctl enable "$SERVICE_NAME" || return 1
-  systemctl restart "$SERVICE_NAME" || return 1
+  then
+    rollback_directory_migration
+    return 1
+  fi
 
   echo "🔄 检查服务状态..."
-  if systemctl is-active --quiet "$SERVICE_NAME"; then
-    rm -f "$INSTALL_DIR/gost"
+  if systemctl daemon-reload &&
+    systemctl enable "$SERVICE_NAME" &&
+    systemctl restart "$SERVICE_NAME" &&
+    systemctl is-active --quiet "$SERVICE_NAME"; then
+    rm -f "$INSTALL_DIR/gost" "$INSTALL_DIR/.migration-binary"       "$INSTALL_DIR/.migration-service" "$INSTALL_DIR/.migration-service-name"
+    DIRECTORY_MIGRATED=false
     echo "✅ 操作完成，$SERVICE_NAME 服务已启动并设置为开机启动。"
     echo "📁 配置目录: $INSTALL_DIR"
   else
     echo "❌ $SERVICE_NAME 服务启动失败，请执行以下命令查看日志："
     echo "journalctl -u $SERVICE_NAME -f"
+    rollback_directory_migration
     return 1
   fi
 }
@@ -495,9 +582,15 @@ install_node() {
     echo "⏭️ 跳过配置文件: gost.json (已存在)"
   else
     echo "📄 创建新配置: gost.json"
-    echo "{}" > "$GOST_CONFIG"
+    if ! echo "{}" > "$GOST_CONFIG"; then
+      rollback_directory_migration
+      return 1
+    fi
   fi
-  chmod 600 "$INSTALL_DIR"/*.json
+  if ! chmod 600 "$INSTALL_DIR"/*.json; then
+    rollback_directory_migration
+    return 1
+  fi
 
   # 追加或更新主控：同 addr 更新密钥（保留原命名空间）；新 addr 分配下一个命名空间
   local ns
@@ -513,7 +606,8 @@ install_node() {
   fi
   if ! upsert_server "$SERVER_ADDR" "$SECRET" "$ns"; then
     echo "❌ 写入主控配置失败"
-    exit 1
+    rollback_directory_migration
+    return 1
   fi
 
   if ! setup_service; then
@@ -641,6 +735,7 @@ uninstall_node() {
 # 主逻辑
 main() {
   parse_args "$@" || return 1
+  select_install_dir || return 1
   if [[ "$DOMESTIC_MODE" == true ]]; then
     echo "国内加速模式: $GITHUB_PROXY"
   fi
