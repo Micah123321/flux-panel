@@ -50,21 +50,54 @@ resolve_download_url() {
 }
 
 download_file() {
-  local url
-  url=$(resolve_download_url "$1")
-  local output="$2"
-
-  if ! curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"; then
-    echo "❌ 下载失败: $url"
-    rm -f "$output"
-    return 1
+  local original_url="$1" output="$2"
+  local partial="$output.part" primary url attempt status http_code
+  primary=$(resolve_download_url "$original_url")
+  local sources=("$primary")
+  # 国内代理优先，连续失败后回退原始官方来源。
+  if [[ "$primary" != "$original_url" ]]; then
+    sources+=("$original_url")
   fi
 
-  if [[ ! -s "$output" ]]; then
-    echo "❌ 下载文件为空: $output"
-    rm -f "$output"
-    return 1
-  fi
+  for url in "${sources[@]}"; do
+    # 换源后重新下载，避免拼接不同来源的内容。
+    rm -f "$partial" || return 1
+    for attempt in 1 2 3 4; do
+      if [[ -s "$partial" ]]; then
+        echo "🔁 续传下载（第 $attempt/4 次）..."
+      fi
+      # 独立重试保留中断文件，也兼容没有 --retry-all-errors 的旧版 curl。
+      if http_code=$(curl -fL --connect-timeout 15 --max-time 300 \
+        --speed-limit 1024 --speed-time 30 --continue-at - \
+        --write-out '%{http_code}' -o "$partial" "$url"); then
+        # curl 的部分版本会把续传请求的 HTTP 416 视为成功。
+        if [[ "$http_code" == 416 ]]; then
+          status=33
+        elif [[ -s "$partial" ]]; then
+          mv -f "$partial" "$output" || return 1
+          return 0
+        else
+          status=18
+          echo "⚠️ 下载文件为空"
+        fi
+      else
+        status=$?
+      fi
+      if [[ "$status" == 33 || "$http_code" == 416 ]]; then
+        echo "⚠️ 下载源不支持当前断点，下一次从头下载"
+        rm -f "$partial" || return 1
+      fi
+      if [[ "$attempt" -lt 4 ]]; then
+        echo "⚠️ 下载未完成（curl $status），2 秒后重试（$attempt/4）..."
+        sleep 2
+      fi
+    done
+    echo "⚠️ 下载源连续失败: $url"
+  done
+
+  rm -f "$partial"
+  echo "❌ 下载失败，现有节点保持不变，请稍后重试。"
+  return 1
 }
 
 # ---------- 多主控 config.json 操作工具 ----------

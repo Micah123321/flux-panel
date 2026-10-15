@@ -48,6 +48,7 @@ curl() {
   fi
 }
 check_and_install_tcpkill() { :; }
+sleep() { :; }
 
 create_legacy_node() {
   local name="$1"
