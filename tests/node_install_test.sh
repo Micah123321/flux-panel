@@ -134,6 +134,38 @@ for previous_service in gost mi-flux-node; do
   assert_configs_preserved
 done
 
+# Quoted startup paths and trailing-slash working directories still belong to this node.
+for exec_style in quoted arguments; do
+  reset_fixture "unit-$exec_style"
+  create_legacy_node gost
+  if [[ "$exec_style" == quoted ]]; then
+    printf '[Service]\nWorkingDirectory=%s/\nExecStart="%s/gost"\n' "$LEGACY_INSTALL_DIR" "$LEGACY_INSTALL_DIR" > "$SERVICE_DIR/gost.service"
+  else
+    printf '[Service]\nWorkingDirectory=%s/\nExecStart=%s/gost -C gost.json\n' "$LEGACY_INSTALL_DIR" "$LEGACY_INSTALL_DIR" > "$SERVICE_DIR/gost.service"
+  fi
+  cp "$SERVICE_DIR/gost.service" "$TEST_DIR/unit.before"
+  select_install_dir
+  fetch_node_binary
+  FAIL_NEW_RESTART=true
+  if setup_service; then fail 'variant service startup failure was missed'; fi
+  [[ "$INSTALL_DIR" == "$LEGACY_INSTALL_DIR" ]] || fail 'variant service directory was not restored'
+  cmp "$SERVICE_DIR/gost.service" "$TEST_DIR/unit.before"
+  assert_configs_preserved
+done
+
+# Migration metadata survives an interrupted installer process.
+reset_fixture interrupted
+create_legacy_node mi-flux-node
+select_install_dir
+fetch_node_binary
+DIRECTORY_MIGRATED=false
+select_install_dir
+FAIL_NEW_RESTART=true
+if setup_service; then fail 'resumed startup failure was missed'; fi
+[[ "$INSTALL_DIR" == "$LEGACY_INSTALL_DIR" && ! -e "$NODE_INSTALL_DIR" ]] || fail 'resumed migration did not restore the old directory'
+grep -Fxq "WorkingDirectory=$LEGACY_INSTALL_DIR" "$SERVICE_DIR/$SERVICE_NAME.service" || fail 'resumed migration restored an invalid service path'
+assert_configs_preserved
+
 # Configuration-only service refreshes also migrate an old node without downloading.
 reset_fixture service-refresh
 create_legacy_node gost

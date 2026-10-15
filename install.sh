@@ -407,14 +407,37 @@ select_install_dir() {
     fi
     INSTALL_DIR="$LEGACY_INSTALL_DIR"
   fi
+  if [[ "$INSTALL_DIR" == "$NODE_INSTALL_DIR" && -f "$INSTALL_DIR/.migration-directory" ]]; then
+    DIRECTORY_MIGRATED=true
+  fi
+}
+
+# 只读取启动程序路径，不执行 unit 内容；兼容引号和后续参数。
+unit_uses_node_dir() {
+  local file="$1" directory="$2" line value executable
+  [[ -f "$file" ]] || return 1
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ "$line" == ExecStart=* ]] || continue
+    value="${line#*=}"
+    read -r executable _ <<< "$value"
+    executable="${executable#\"}"
+    executable="${executable%\"}"
+    executable="${executable#\'}"
+    executable="${executable%\'}"
+    if [[ "$executable" == "$directory/gost" || "$executable" == "$directory/$SERVICE_NAME" ]]; then
+      return 0
+    fi
+  done < "$file"
+  return 1
 }
 
 backup_directory_migration() {
   [[ "$INSTALL_DIR" == "$LEGACY_INSTALL_DIR" ]] || return 0
+  printf '%s\n' "$LEGACY_INSTALL_DIR" > "$INSTALL_DIR/.migration-directory" || return 1
   local service
   for service in "$SERVICE_NAME" gost; do
-    if [[ -f "$SERVICE_DIR/$service.service" ]] &&
-      grep -Fxq "WorkingDirectory=$LEGACY_INSTALL_DIR" "$SERVICE_DIR/$service.service"; then
+    if unit_uses_node_dir "$SERVICE_DIR/$service.service" "$LEGACY_INSTALL_DIR"; then
       cp -p "$SERVICE_DIR/$service.service" "$INSTALL_DIR/.migration-service" || return 1
       echo "$service" > "$INSTALL_DIR/.migration-service-name"
       break
@@ -436,6 +459,9 @@ relocate_install_dir() {
 
 rollback_directory_migration() {
   [[ "$DIRECTORY_MIGRATED" == true || -f "$INSTALL_DIR/.migration-service-name" ]] || return 0
+  if [[ "$INSTALL_DIR" == "$NODE_INSTALL_DIR" && -f "$INSTALL_DIR/.migration-directory" ]]; then
+    DIRECTORY_MIGRATED=true
+  fi
   local previous_service=""
   if [[ -f "$INSTALL_DIR/.migration-service-name" ]]; then
     previous_service=$(<"$INSTALL_DIR/.migration-service-name")
@@ -445,6 +471,7 @@ rollback_directory_migration() {
     mv "$INSTALL_DIR/.migration-binary" "$INSTALL_DIR/$SERVICE_NAME" || return 1
   fi
   if [[ "$previous_service" != "$SERVICE_NAME" ]]; then
+    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     rm -f "$SERVICE_DIR/$SERVICE_NAME.service"
   fi
   if [[ -n "$previous_service" ]]; then
@@ -465,9 +492,8 @@ rollback_directory_migration() {
 
 # 仅接管此脚本创建的旧服务，避免影响服务器上独立安装的 gost。
 is_legacy_node_service() {
-  [[ -f "$SERVICE_DIR/gost.service" ]] &&
-    { grep -Fxq "ExecStart=$INSTALL_DIR/gost" "$SERVICE_DIR/gost.service" ||
-      grep -Fxq "ExecStart=$LEGACY_INSTALL_DIR/gost" "$SERVICE_DIR/gost.service"; }
+  unit_uses_node_dir "$SERVICE_DIR/gost.service" "$INSTALL_DIR" ||
+    unit_uses_node_dir "$SERVICE_DIR/gost.service" "$LEGACY_INSTALL_DIR"
 }
 
 stop_node_services() {
@@ -550,7 +576,7 @@ EOF
     systemctl enable "$SERVICE_NAME" &&
     systemctl restart "$SERVICE_NAME" &&
     systemctl is-active --quiet "$SERVICE_NAME"; then
-    rm -f "$INSTALL_DIR/gost" "$INSTALL_DIR/.migration-binary"       "$INSTALL_DIR/.migration-service" "$INSTALL_DIR/.migration-service-name"
+    rm -f "$INSTALL_DIR/gost" "$INSTALL_DIR/.migration-binary"       "$INSTALL_DIR/.migration-service" "$INSTALL_DIR/.migration-service-name" "$INSTALL_DIR/.migration-directory"
     DIRECTORY_MIGRATED=false
     echo "✅ 操作完成，$SERVICE_NAME 服务已启动并设置为开机启动。"
     echo "📁 配置目录: $INSTALL_DIR"
