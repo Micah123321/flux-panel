@@ -365,6 +365,11 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      */
     @Override
     public R getInstallCommand(Long id) {
+        return getInstallCommand(id, false);
+    }
+
+    @Override
+    public R getInstallCommand(Long id, boolean domestic) {
         // 1. 验证节点是否存在
         Node node = this.getById(id);
         if (node == null) {
@@ -372,7 +377,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 2. 构建安装命令
-        return buildInstallCommand(node);
+        return buildInstallCommand(node, domestic);
     }
 
     /**
@@ -381,21 +386,25 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param node 节点对象
      * @return 格式化的安装命令
      */
-    private R buildInstallCommand(Node node) {
+    private R buildInstallCommand(Node node, boolean domestic) {
         ViteConfig viteConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "ip"));
         if (viteConfig == null) return R.err("请先前往网站配置中设置ip");
 
         StringBuilder command = new StringBuilder();
 
         // 第一部分：下载安装脚本
-        command.append("curl -fL --retry 3 https://raw.githubusercontent.com/Micah123321/flux-panel/refs/heads/main/install.sh")
+        command.append("curl -fL --retry 3 ");
+        if (domestic) {
+            command.append("https://cghp2.535888.xyz/");
+        }
+        command.append("https://raw.githubusercontent.com/Micah123321/flux-panel/refs/heads/main/install.sh")
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
 
         // 处理服务器地址，如果是IPv6需要添加方括号
         String processedServerAddr = processServerAddress(viteConfig.getValue());
 
         // 第二部分：执行安装脚本（去掉-u参数）
-        command.append("./install.sh")
+        command.append(domestic ? "./install.sh -c" : "./install.sh")
                .append(" -a ").append(processedServerAddr)  // 服务器地址
                .append(" -s ").append(node.getSecret());    // 节点密钥
 

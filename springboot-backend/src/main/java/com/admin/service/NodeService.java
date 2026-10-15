@@ -27,4 +27,6 @@ public interface NodeService extends IService<Node> {
 
     R getInstallCommand(Long id);
 
+    R getInstallCommand(Long id, boolean domestic);
+
 }

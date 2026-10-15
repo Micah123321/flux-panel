@@ -43,7 +43,6 @@ interface Node {
     downloadSpeed: number;
     uptime: number;
   } | null;
-  copyLoading?: boolean;
 }
 
 interface NodeForm {
@@ -87,6 +86,11 @@ export default function NodePage() {
   const [installCommandModal, setInstallCommandModal] = useState(false);
   const [installCommand, setInstallCommand] = useState('');
   const [currentNodeName, setCurrentNodeName] = useState('');
+  const [currentNodeId, setCurrentNodeId] = useState<number | null>(null);
+  const [domesticInstall, setDomesticInstall] = useState(false);
+  const [installCommandLoading, setInstallCommandLoading] = useState(false);
+  const [installCommandError, setInstallCommandError] = useState('');
+  const installCommandRequestRef = useRef(0);
   
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -98,6 +102,7 @@ export default function NodePage() {
     initWebSocket();
     
     return () => {
+      installCommandRequestRef.current++;
       closeWebSocket();
     };
   }, []);
@@ -111,8 +116,7 @@ export default function NodePage() {
         setNodeList(res.data.map((node: any) => ({
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
-          systemInfo: null,
-          copyLoading: false
+          systemInfo: null
         })));
       } else {
         toast.error(res.msg || '加载节点列表失败');
@@ -468,42 +472,62 @@ export default function NodePage() {
     }
   };
 
-  // 复制安装命令
-  const handleCopyInstallCommand = async (node: Node) => {
-    setNodeList(prev => prev.map(n => 
-      n.id === node.id ? { ...n, copyLoading: true } : n
-    ));
-    
+  const loadInstallCommand = async (nodeId: number, domestic: boolean) => {
+    const requestId = ++installCommandRequestRef.current;
+    setInstallCommand('');
+    setInstallCommandError('');
+    setInstallCommandLoading(true);
+
     try {
-      const res = await getNodeInstallCommand(node.id);
-      if (res.code === 0 && res.data) {
-        try {
-          await navigator.clipboard.writeText(res.data);
-          toast.success('安装命令已复制到剪贴板');
-        } catch (copyError) {
-          // 复制失败，显示安装命令模态框
-          setInstallCommand(res.data);
-          setCurrentNodeName(node.name);
-          setInstallCommandModal(true);
-        }
+      const res = await getNodeInstallCommand(nodeId, domestic);
+      // Ignore responses from a previous mode, node, or closed modal.
+      if (requestId !== installCommandRequestRef.current) return;
+
+      if (res.code === 0 && typeof res.data === 'string' && res.data.trim()) {
+        setInstallCommand(res.data);
       } else {
-        toast.error(res.msg || '获取安装命令失败');
+        setInstallCommandError(res.msg || '获取安装命令失败，请重试');
       }
     } catch (error) {
-      toast.error('获取安装命令失败');
+      if (requestId === installCommandRequestRef.current) {
+        setInstallCommandError('获取安装命令失败，请检查网络后重试');
+      }
     } finally {
-      setNodeList(prev => prev.map(n => 
-        n.id === node.id ? { ...n, copyLoading: false } : n
-      ));
+      if (requestId === installCommandRequestRef.current) {
+        setInstallCommandLoading(false);
+      }
     }
+  };
+
+  const handleCopyInstallCommand = (node: Node) => {
+    setCurrentNodeId(node.id);
+    setCurrentNodeName(node.name);
+    setDomesticInstall(false);
+    setInstallCommandModal(true);
+    void loadInstallCommand(node.id, false);
+  };
+
+  const handleDomesticInstallChange = (domestic: boolean) => {
+    setDomesticInstall(domestic);
+    if (currentNodeId !== null) {
+      void loadInstallCommand(currentNodeId, domestic);
+    }
+  };
+
+  const closeInstallCommandModal = () => {
+    installCommandRequestRef.current++;
+    setInstallCommandModal(false);
+    setCurrentNodeId(null);
+    setInstallCommandLoading(false);
   };
 
   // 手动复制安装命令
   const handleManualCopy = async () => {
+    if (installCommandLoading || !installCommand) return;
+
     try {
       await navigator.clipboard.writeText(installCommand);
       toast.success('安装命令已复制到剪贴板');
-      setInstallCommandModal(false);
     } catch (error) {
       toast.error('复制失败，请手动选择文本复制');
     }
@@ -793,7 +817,6 @@ export default function NodePage() {
                         variant="flat"
                         color="success"
                         onPress={() => handleCopyInstallCommand(node)}
-                        isLoading={node.copyLoading}
                         className="flex-1 min-h-8"
                       >
                         安装
@@ -1041,7 +1064,7 @@ export default function NodePage() {
         {/* 安装命令模态框 */}
         <Modal 
           isOpen={installCommandModal} 
-          onClose={() => setInstallCommandModal(false)}
+          onClose={closeInstallCommandModal}
           size="2xl"
         scrollBehavior="outside"
         backdrop="blur"
@@ -1051,11 +1074,45 @@ export default function NodePage() {
             <ModalHeader>安装命令 - {currentNodeName}</ModalHeader>
             <ModalBody>
               <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium">国内加速</p>
+                    <p className="text-xs text-default-500">加速安装脚本及 GitHub 资源下载</p>
+                  </div>
+                  <Switch
+                    aria-label="国内加速"
+                    isSelected={domesticInstall}
+                    onValueChange={handleDomesticInstallChange}
+                  />
+                </div>
+                {installCommandLoading && (
+                  <div className="flex items-center gap-2 text-sm text-default-500" role="status">
+                    <Spinner size="sm" />
+                    正在获取安装命令...
+                  </div>
+                )}
+                {installCommandError && (
+                  <div className="space-y-2">
+                    <Alert color="danger" title="获取安装命令失败" description={installCommandError} />
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      onPress={() => {
+                        if (currentNodeId !== null) {
+                          void loadInstallCommand(currentNodeId, domesticInstall);
+                        }
+                      }}
+                    >
+                      重试
+                    </Button>
+                  </div>
+                )}
                 <p className="text-sm text-default-600">
                   请复制以下安装命令到服务器上执行：
                 </p>
                 <div className="relative">
                   <Textarea
+                    aria-label="节点安装命令"
                     value={installCommand}
                     readOnly
                     variant="bordered"
@@ -1072,6 +1129,7 @@ export default function NodePage() {
                     variant="flat"
                     className="absolute top-2 right-2"
                     onPress={handleManualCopy}
+                    isDisabled={installCommandLoading || !installCommand}
                   >
                     复制
                   </Button>
@@ -1084,7 +1142,7 @@ export default function NodePage() {
             <ModalFooter>
               <Button
                 variant="flat"
-                onPress={() => setInstallCommandModal(false)}
+                onPress={closeInstallCommandModal}
               >
                 关闭
               </Button>

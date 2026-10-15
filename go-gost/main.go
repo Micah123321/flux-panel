@@ -100,7 +100,7 @@ func init() {
 	flag.Parse()
 
 	if printVersion {
-		fmt.Fprintf(os.Stdout, "gost %s (%s %s/%s)\n",
+		fmt.Fprintf(os.Stdout, "mi-flux-node %s (%s %s/%s)\n",
 			version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
@@ -142,5 +142,5 @@ func main() {
 	}
 }
 
-// GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o gost
-// upx --best --lzma gost
+// GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o mi-flux-node
+// upx --best --lzma mi-flux-node

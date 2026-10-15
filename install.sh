@@ -26,17 +26,30 @@ build_download_url() {
     echo "${RELEASE_BASE_URL}/gost-${ARCH}"
 }
 
-# 下载地址
+# 下载地址保留现有 Release 资产名，安装后的程序和服务统一使用新名称。
 DOWNLOAD_URL=$(build_download_url)
+SERVICE_NAME="mi-flux-node"
+SERVICE_DIR="/etc/systemd/system"
+# 沿用配置目录以兼容已有节点和转发配置。
 INSTALL_DIR="/etc/gost"
-COUNTRY=$(curl -fsSL --retry 3 https://ipinfo.io/country 2>/dev/null || true)
-if [ "$COUNTRY" = "CN" ]; then
-    # 拼接 URL
-    DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
-fi
+DOMESTIC_MODE=false
+GITHUB_PROXY="https://cghp2.535888.xyz/"
+
+resolve_download_url() {
+  local url="$1"
+  if [[ "$DOMESTIC_MODE" == true ]]; then
+    case "$url" in
+      https://github.com/*|https://raw.githubusercontent.com/*|https://api.github.com/*|https://objects.githubusercontent.com/*|https://release-assets.githubusercontent.com/*|https://codeload.github.com/*)
+        url="$GITHUB_PROXY$url"
+        ;;
+    esac
+  fi
+  echo "$url"
+}
 
 download_file() {
-  local url="$1"
+  local url
+  url=$(resolve_download_url "$1")
   local output="$2"
 
   if ! curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"; then
@@ -261,7 +274,7 @@ ensure_multi_master_config() {
 # 显示菜单
 show_menu() {
   echo "==============================================="
-  echo "              管理脚本"
+  echo "              $SERVICE_NAME 管理脚本"
   echo "==============================================="
   echo "请选择操作："
   echo "1. 安装（首个主控）"
@@ -367,78 +380,104 @@ get_config_params() {
   fi
 }
 
-# 解析命令行参数
-while getopts "a:s:" opt; do
-  case $opt in
-    a) SERVER_ADDR="$OPTARG" ;;
-    s) SECRET="$OPTARG" ;;
-    *) echo "❌ 无效参数"; exit 1 ;;
-  esac
-done
-
-# 下载并放置 gost 二进制（安装/更新共用）
-fetch_gost_binary() {
-  # 停止并禁用已有服务
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🔍 检测到已存在的gost服务"
-    systemctl stop gost 2>/dev/null && echo "🛑 停止服务"
-    systemctl disable gost 2>/dev/null && echo "🚫 禁用自启"
-  fi
-
-  # 删除旧文件
-  [[ -f "$INSTALL_DIR/gost" ]] && echo "🧹 删除旧文件 gost" && rm -f "$INSTALL_DIR/gost"
-
-  # 下载 gost
-  echo "⬇️ 下载 gost 中..."
-  if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost"; then
-    return 1
-  fi
-  chmod +x "$INSTALL_DIR/gost"
-  if ! GOST_VERSION=$(cd "$INSTALL_DIR" && ./gost -V 2>&1); then
-    echo "❌ 下载的 gost 无法执行：$GOST_VERSION"
-    return 1
-  fi
-  echo "✅ 下载完成"
-  echo "🔎 gost 版本：$GOST_VERSION"
-  return 0
+# -c 显式启用国内模式，不依赖出口 IP 的地区识别。
+parse_args() {
+  local opt
+  OPTIND=1
+  while getopts "a:s:c" opt; do
+    case $opt in
+      a) SERVER_ADDR="$OPTARG" ;;
+      s) SECRET="$OPTARG" ;;
+      c) DOMESTIC_MODE=true ;;
+      *) echo "❌ 无效参数，用法: $0 [-c] [-a 主控地址] [-s 节点密钥]"; return 1 ;;
+    esac
+  done
 }
 
-# 创建/刷新 systemd 服务
+# 仅接管此脚本创建的旧服务，避免影响服务器上独立安装的 gost。
+is_legacy_node_service() {
+  [[ -f "$SERVICE_DIR/gost.service" ]] &&
+    grep -Fxq "ExecStart=$INSTALL_DIR/gost" "$SERVICE_DIR/gost.service"
+}
+
+stop_node_services() {
+  if [[ -f "$SERVICE_DIR/$SERVICE_NAME.service" ]]; then
+    systemctl stop "$SERVICE_NAME" || return 1
+  fi
+  if is_legacy_node_service; then
+    echo "🔄 迁移旧节点服务为 $SERVICE_NAME"
+    systemctl stop gost || return 1
+    systemctl disable gost || return 1
+    rm -f "$SERVICE_DIR/gost.service" || return 1
+  fi
+}
+
+# 下载、验证成功后才停止现有节点并替换二进制。
+fetch_node_binary() {
+  local binary="$INSTALL_DIR/$SERVICE_NAME"
+  local pending="$binary.new"
+  echo "⬇️ 下载 $SERVICE_NAME 中..."
+  if ! download_file "$DOWNLOAD_URL" "$pending"; then
+    return 1
+  fi
+  chmod +x "$pending" || return 1
+  if ! NODE_VERSION=$(cd "$INSTALL_DIR" && "./$SERVICE_NAME.new" -V 2>&1); then
+    echo "❌ 新版本执行校验失败：$NODE_VERSION"
+    rm -f "$pending"
+    return 1
+  fi
+  if ! stop_node_services; then
+    rm -f "$pending"
+    return 1
+  fi
+  mv "$pending" "$binary" || return 1
+  echo "🔎 $SERVICE_NAME 版本：$NODE_VERSION"
+}
+
+# 创建/刷新 systemd 服务；配置文件保持原格式。
 setup_service() {
-  SERVICE_FILE="/etc/systemd/system/gost.service"
-  cat > "$SERVICE_FILE" <<EOF
+  local binary="$INSTALL_DIR/$SERVICE_NAME"
+  # 添加/移除主控时也支持从已有旧二进制迁移。
+  if [[ ! -x "$binary" && -x "$INSTALL_DIR/gost" ]]; then
+    cp -p "$INSTALL_DIR/gost" "$binary" || return 1
+  fi
+  [[ -x "$binary" ]] || return 1
+  stop_node_services || return 1
+  local service_file="$SERVICE_DIR/$SERVICE_NAME.service"
+  cat > "$service_file" <<EOF
 [Unit]
-Description=Gost Proxy Service
+Description=mi-flux-node
 After=network.target
 
 [Service]
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/gost
+ExecStart=$binary
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
+  [[ $? -eq 0 ]] || return 1
 
-  systemctl daemon-reload
-  systemctl enable gost
-  systemctl restart gost
+  systemctl daemon-reload || return 1
+  systemctl enable "$SERVICE_NAME" || return 1
+  systemctl restart "$SERVICE_NAME" || return 1
 
   echo "🔄 检查服务状态..."
-  if systemctl is-active --quiet gost; then
-    echo "✅ 操作完成，gost服务已启动并设置为开机启动。"
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    rm -f "$INSTALL_DIR/gost"
+    echo "✅ 操作完成，$SERVICE_NAME 服务已启动并设置为开机启动。"
     echo "📁 配置目录: $INSTALL_DIR"
-    echo "🔧 服务状态: $(systemctl is-active gost)"
   else
-    echo "❌ gost服务启动失败，请执行以下命令查看日志："
-    echo "journalctl -u gost -f"
+    echo "❌ $SERVICE_NAME 服务启动失败，请执行以下命令查看日志："
+    echo "journalctl -u $SERVICE_NAME -f"
     return 1
   fi
 }
 
 # 安装功能（首个主控，或重跑时按 addr 追加/更新）
-install_gost() {
-  echo "🚀 开始安装 GOST..."
+install_node() {
+  echo "🚀 开始安装 $SERVICE_NAME..."
   get_config_params
 
   check_and_install_tcpkill
@@ -446,7 +485,7 @@ install_gost() {
     exit 1
   fi
 
-  if ! fetch_gost_binary; then
+  if ! fetch_node_binary; then
     exit 1
   fi
 
@@ -484,8 +523,8 @@ install_gost() {
 
 # 添加主控（要求已安装）
 add_server() {
-  if [[ ! -f "$INSTALL_DIR/gost" ]]; then
-    echo "❌ GOST 未安装，请先选择安装。"
+  if [[ ! -f "$INSTALL_DIR/$SERVICE_NAME" && ! -f "$INSTALL_DIR/gost" ]]; then
+    echo "❌ 节点未安装，请先选择安装。"
     return 1
   fi
   get_config_params
@@ -506,60 +545,26 @@ add_server() {
     echo "❌ 写入主控配置失败"
     return 1
   fi
-  echo "🔍 下载最新版本 gost..."
-  if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost.new"; then
+  if ! fetch_node_binary; then
+    echo "❌ 节点更新失败，请重试添加主控"
     return 1
-  fi
-  chmod +x "$INSTALL_DIR/gost.new"
-  if GOST_VERSION=$(cd "$INSTALL_DIR" && ./gost.new -V 2>&1); then
-    if systemctl list-units --full -all | grep -Fq "gost.service"; then
-      systemctl stop gost 2>/dev/null
-    fi
-    mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
-    echo "🔎 新版本：$GOST_VERSION"
-  else
-    echo "⚠️ 新版本下载校验失败，保留现有二进制继续接入主控"
-    rm -f "$INSTALL_DIR/gost.new"
   fi
   setup_service
 }
 
 # 更新功能
-update_gost() {
-  echo "🔄 开始更新 GOST..."
+update_node() {
+  echo "🔄 开始更新 $SERVICE_NAME..."
 
-  if [[ ! -d "$INSTALL_DIR" ]]; then
-    echo "❌ GOST 未安装，请先选择安装。"
+  if [[ ! -f "$INSTALL_DIR/$SERVICE_NAME" && ! -f "$INSTALL_DIR/gost" ]]; then
+    echo "❌ 节点未安装，请先选择安装。"
     return 1
   fi
 
-  echo "📥 使用下载地址: $DOWNLOAD_URL"
-
+  echo "📥 使用下载地址: $(resolve_download_url "$DOWNLOAD_URL")"
   check_and_install_tcpkill
-
-  echo "⬇️ 下载最新版本..."
-  if ! download_file "$DOWNLOAD_URL" "$INSTALL_DIR/gost.new"; then
-    return 1
-  fi
-  chmod +x "$INSTALL_DIR/gost.new"
-  if ! GOST_VERSION=$(cd "$INSTALL_DIR" && ./gost.new -V 2>&1); then
-    echo "❌ 下载的新版本 gost 无法执行：$GOST_VERSION"
-    rm -f "$INSTALL_DIR/gost.new"
-    return 1
-  fi
-
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止 gost 服务..."
-    systemctl stop gost
-  fi
-
-  mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
-
-  echo "🔎 新版本：$GOST_VERSION"
-
-  echo "🔄 重启服务..."
-  systemctl start gost
-
+  fetch_node_binary || return 1
+  setup_service || return 1
   echo "✅ 更新完成，服务已重新启动。"
 }
 
@@ -608,23 +613,19 @@ remove_server() {
 }
 
 # 卸载功能
-uninstall_gost() {
-  echo "🗑️ 开始卸载 GOST..."
+uninstall_node() {
+  echo "🗑️ 开始卸载 $SERVICE_NAME..."
 
-  read -p "确认卸载 GOST 吗？此操作将删除所有相关文件 (y/N): " confirm
+  read -p "确认卸载 $SERVICE_NAME 吗？此操作将删除所有相关文件 (y/N): " confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "❌ 取消卸载"
     return 0
   fi
 
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止并禁用服务..."
-    systemctl stop gost 2>/dev/null
-    systemctl disable gost 2>/dev/null
-  fi
-
-  if [[ -f "/etc/systemd/system/gost.service" ]]; then
-    rm -f "/etc/systemd/system/gost.service"
+  stop_node_services || return 1
+  if [[ -f "$SERVICE_DIR/$SERVICE_NAME.service" ]]; then
+    systemctl disable "$SERVICE_NAME" || return 1
+    rm -f "$SERVICE_DIR/$SERVICE_NAME.service" || return 1
     echo "🧹 删除服务文件"
   fi
 
@@ -633,16 +634,19 @@ uninstall_gost() {
     echo "🧹 删除安装目录: $INSTALL_DIR"
   fi
 
-  systemctl daemon-reload
-
+  systemctl daemon-reload || return 1
   echo "✅ 卸载完成"
 }
 
 # 主逻辑
 main() {
+  parse_args "$@" || return 1
+  if [[ "$DOMESTIC_MODE" == true ]]; then
+    echo "国内加速模式: $GITHUB_PROXY"
+  fi
   # 如果提供了命令行参数，直接执行安装（重跑 = 追加/更新主控）
   if [[ -n "$SERVER_ADDR" && -n "$SECRET" ]]; then
-    install_gost
+    install_node || return 1
     delete_self
     exit 0
   fi
@@ -653,22 +657,22 @@ main() {
 
     case $choice in
       1)
-        install_gost
+        install_node || return 1
         delete_self
         exit 0
         ;;
       2)
-        add_server
+        add_server || return 1
         delete_self
         exit 0
         ;;
       3)
-        update_gost
+        update_node || return 1
         delete_self
         exit 0
         ;;
       4)
-        remove_server
+        remove_server || return 1
         delete_self
         exit 0
         ;;
@@ -676,7 +680,7 @@ main() {
         show_servers
         ;;
       6)
-        uninstall_gost
+        uninstall_node || return 1
         delete_self
         exit 0
         ;;
@@ -693,5 +697,7 @@ main() {
   done
 }
 
-# 执行主函数
-main
+# 支持只加载函数以执行隔离检查。
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
