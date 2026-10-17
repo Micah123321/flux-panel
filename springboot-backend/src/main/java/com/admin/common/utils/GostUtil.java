@@ -10,8 +10,11 @@ import org.aspectj.apache.bcel.generic.RET;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 public class GostUtil {
+
+    private static final long SELECTOR_FAIL_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(600);
 
 
     public static GostDto AddLimiters(Long node_id, Long name, String speed) {
@@ -107,7 +110,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", SELECTOR_FAIL_TIMEOUT_NANOS);
         forwarder.put("selector", selector);
 
         data.put("forwarder", forwarder);
@@ -153,7 +156,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", SELECTOR_FAIL_TIMEOUT_NANOS);
         forwarder.put("selector", selector);
 
         data.put("forwarder", forwarder);
@@ -268,7 +271,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", StringUtils.isBlank(strategy) ? "fifo" : strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", SELECTOR_FAIL_TIMEOUT_NANOS);
         hop.put("selector", selector);
 
         JSONArray hops = new JSONArray();
@@ -372,7 +375,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", SELECTOR_FAIL_TIMEOUT_NANOS);
         forwarder.put("selector", selector);
         return forwarder;
     }

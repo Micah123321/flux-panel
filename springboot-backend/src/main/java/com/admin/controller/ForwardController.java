@@ -55,6 +55,19 @@ public class ForwardController extends BaseController {
     }
 
     @LogAnnotation
+    @PostMapping("/resync")
+    public R resync(@RequestBody Map<String, Object> params) {
+        if (params == null || params.get("id") == null) {
+            return R.err("请提供转发ID");
+        }
+        try {
+            return forwardService.resyncForward(Long.valueOf(params.get("id").toString()));
+        } catch (NumberFormatException e) {
+            return R.err("转发ID格式错误");
+        }
+    }
+
+    @LogAnnotation
     @PostMapping("/delete")
     public R delete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
@@ -107,8 +120,22 @@ public class ForwardController extends BaseController {
     @LogAnnotation
     @PostMapping("/diagnose")
     public R diagnoseForward(@RequestBody Map<String, Object> params) {
-        Long forwardId = Long.valueOf(params.get("forwardId").toString());
-        return forwardService.diagnoseForward(forwardId);
+        if (params == null || params.get("forwardId") == null) {
+            return R.err("请提供转发ID");
+        }
+        Object protocol = params.get("protocol");
+        Object payload = params.get("payload");
+        if ((protocol != null && !(protocol instanceof String))
+                || (payload != null && !(payload instanceof String))) {
+            return R.err("protocol和payload必须是字符串");
+        }
+        Long forwardId;
+        try {
+            forwardId = Long.valueOf(params.get("forwardId").toString());
+        } catch (NumberFormatException e) {
+            return R.err("转发ID格式错误");
+        }
+        return forwardService.diagnoseForward(forwardId, (String) protocol, (String) payload);
     }
 
     /**

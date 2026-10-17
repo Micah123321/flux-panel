@@ -373,6 +373,50 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     @Override
+    public R resyncForward(Long id) {
+        UserInfo currentUser = getCurrentUserInfo();
+        Forward forward = validateForwardExists(id, currentUser);
+        if (forward == null) {
+            return R.err("转发不存在");
+        }
+        if (!Objects.equals(forward.getStatus(), FORWARD_STATUS_ERROR)) {
+            return R.err("转发状态已变化，请刷新列表");
+        }
+        Tunnel tunnel = validateTunnel(forward.getTunnelId());
+        if (tunnel == null || !Objects.equals(tunnel.getStatus(), TUNNEL_STATUS_ACTIVE)) {
+            return R.err("隧道不存在或已禁用");
+        }
+        UserTunnel userTunnel = getUserTunnel(forward.getUserId(), forward.getTunnelId());
+        if (currentUser.getRoleId() != ADMIN_ROLE_ID || !Objects.equals(currentUser.getUserId(), forward.getUserId())) {
+            User owner = userService.getById(forward.getUserId());
+            if (owner == null || !Objects.equals(owner.getStatus(), 1)) {
+                return R.err("用户不存在或已禁用");
+            }
+            if (userTunnel == null || !Objects.equals(userTunnel.getStatus(), 1)) {
+                return R.err("用户隧道授权不存在或已禁用");
+            }
+            R flowCheck = checkUserFlowLimits(forward.getUserId(), tunnel);
+            if (flowCheck.getCode() != 0) {
+                return flowCheck;
+            }
+        }
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
+        }
+        // 重试沿用持久化配置及原限速，完整下发成功后才恢复启用。
+        Forward synced = new Forward();
+        BeanUtils.copyProperties(forward, synced);
+        R result = updateGostServices(synced, tunnel, userTunnel == null ? null : userTunnel.getSpeedId(), nodeInfo, userTunnel);
+        if (result.getCode() != 0) {
+            return result;
+        }
+        synced.setStatus(FORWARD_STATUS_ACTIVE);
+        synced.setUpdatedTime(System.currentTimeMillis());
+        return this.updateById(synced) ? R.ok("配置已同步") : R.err("保存同步状态失败");
+    }
+
+    @Override
     public R deleteForward(Long id) {
         // 1. 获取当前用户信息
         UserInfo currentUser = getCurrentUserInfo();
@@ -723,6 +767,22 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R diagnoseForward(Long id) {
+        return diagnoseForward(id, "tcp", null);
+    }
+
+    @Override
+    public R diagnoseForward(Long id, String protocol, String payload) {
+        String selectedProtocol = protocol == null ? "tcp" : protocol;
+        if (!"tcp".equals(selectedProtocol) && !"udp".equals(selectedProtocol)) {
+            return R.err("protocol仅支持tcp或udp");
+        }
+        String normalizedPayload = payload == null ? "" : payload.replaceAll("\\s", "");
+        if (normalizedPayload.length() > 2048 || (normalizedPayload.length() % 2) != 0
+                || !normalizedPayload.matches("[0-9a-fA-F]*")) {
+            return R.err("payload必须是十六进制字节，最多1024字节");
+        }
+        normalizedPayload = normalizedPayload.toLowerCase(Locale.ROOT);
+        boolean udp = "udp".equals(selectedProtocol);
         // 1. 获取当前用户信息
         UserInfo currentUser = getCurrentUserInfo();
 
@@ -738,16 +798,36 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("隧道不存在");
         }
 
-        // 4. 获取节点组展开后的入口/出口节点信息
-        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        // UDP diagnostics retain offline members so their uncertainty is visible.
+        NodeInfo nodeInfo = getRequiredNodes(tunnel, udp);
         if (nodeInfo.isHasError()) {
             return R.err(nodeInfo.getErrorMessage());
         }
 
         List<DiagnosisResult> results = new ArrayList<>();
         String[] remoteAddresses = forward.getRemoteAddr().split(",");
-        // 6. 根据隧道类型执行不同的诊断策略
-        if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
+        // UDP probes the application listener, not the tunnel transport port.
+        if (udp) {
+            String listenerIp = udpDiagnosticListener(tunnel.getUdpListenAddr());
+            for (Node inNode : nodeInfo.getInNodes()) {
+                results.add(performUdpPingDiagnosis(inNode, listenerIp, forward.getInPort(),
+                        "入口->转发服务->目标（本地UDP入口）", normalizedPayload));
+            }
+            List<Node> directNodes = new ArrayList<>(nodeInfo.getInNodes());
+            directNodes.addAll(nodeInfo.getOutNodes());
+            for (int nodeIndex = 0; nodeIndex < directNodes.size(); nodeIndex++) {
+                Node node = directNodes.get(nodeIndex);
+                String description = nodeIndex < nodeInfo.getInNodes().size() ? "入口->目标（直达）" : "出口->目标（直达）";
+                for (String remoteAddress : remoteAddresses) {
+                    String targetIp = extractIpFromAddress(remoteAddress);
+                    int targetPort = extractPortFromAddress(remoteAddress);
+                    if (targetIp == null || targetPort == -1) {
+                        return R.err("目标地址格式错误: " + remoteAddress);
+                    }
+                    results.add(performUdpPingDiagnosis(node, targetIp, targetPort, description, normalizedPayload));
+                }
+            }
+        } else if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
             // 端口转发：每个入口节点都应能直连目标地址。
             for (Node inNode : nodeInfo.getInNodes()) {
                 for (String remoteAddress : remoteAddresses) {
@@ -786,6 +866,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         // 7. 构建诊断报告
         Map<String, Object> diagnosisReport = new HashMap<>();
         diagnosisReport.put("forwardId", id);
+        diagnosisReport.put("protocol", selectedProtocol);
+        if (udp) {
+            diagnosisReport.put("message", "UDP诊断包含目标直达与本地转发入口探测；跳过入口->出口传输端口，转发探测按配置选择目标");
+        }
         diagnosisReport.put("forwardName", forward.getName());
         diagnosisReport.put("tunnelType", tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD ? "端口转发" : "隧道转发");
         diagnosisReport.put("results", results);
@@ -924,6 +1008,123 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         return -1;
     }
 
+    private String udpDiagnosticListener(String listenAddr) {
+        String address = listenAddr == null ? "" : listenAddr.trim();
+        if (address.startsWith("[") && address.endsWith("]")) {
+            address = address.substring(1, address.length() - 1);
+        }
+        if (address.isEmpty() || "0.0.0.0".equals(address)) {
+            return "127.0.0.1";
+        }
+        return "::".equals(address) ? "::1" : address;
+    }
+
+    private DiagnosisResult performUdpPingDiagnosis(Node node, String targetIp, int port,
+                                                   String description, String payload) {
+        DiagnosisResult result = new DiagnosisResult();
+        result.setNodeId(node.getId());
+        result.setNodeName(node.getName());
+        result.setTargetIp(targetIp);
+        result.setTargetPort(port);
+        result.setDescription(description);
+        result.setProtocol("udp");
+        result.setTimestamp(System.currentTimeMillis());
+        result.setMessage("UDP未确认：节点未返回有效探测结果");
+        if (!Objects.equals(node.getStatus(), NODE_STATUS_ONLINE)) {
+            result.setMessage("UDP未确认：节点离线");
+            return result;
+        }
+        try {
+            JSONObject request = new JSONObject();
+            request.put("ip", targetIp);
+            request.put("port", port);
+            request.put("count", 2);
+            request.put("timeout", 1500);
+            request.put("payload", payload);
+            GostDto reply = WebSocketServer.send_msg(node.getId(), request, "UdpPing");
+            if (reply == null) {
+                return result;
+            }
+            String message = reply.getMsg();
+            String lowerMessage = message == null ? "" : message.toLowerCase(Locale.ROOT);
+            if (lowerMessage.contains("unknown") || lowerMessage.contains("unsupported")
+                    || lowerMessage.contains("not support") || lowerMessage.contains("not found")
+                    || lowerMessage.contains("unrecognized") || lowerMessage.contains("未知")
+                    || lowerMessage.contains("不支持")) {
+                result.setMessage("UDP未确认：节点不支持UdpPing，请更新节点；" + message);
+                return result;
+            }
+            if (!GOST_SUCCESS_MSG.equals(message)) {
+                result.setMessage("UDP未确认：" + (isBlank(message) ? "节点无响应" : message));
+                return result;
+            }
+            if (!(reply.getData() instanceof JSONObject)) {
+                result.setMessage("UDP未确认：节点缺少UDP诊断数据，请更新节点");
+                return result;
+            }
+            JSONObject data = (JSONObject) reply.getData();
+            String status = data.getString("status");
+            Integer sent = udpInteger(data.get("sentPackets"));
+            Integer received = udpInteger(data.get("receivedPackets"));
+            boolean reachable = "reachable".equals(status);
+            boolean validStatus = reachable || "unreachable".equals(status) || "unknown".equals(status);
+            boolean valid = validStatus && data.get("success") instanceof Boolean
+                    && reachable == Boolean.TRUE.equals(data.get("success"))
+                    && targetIp.equals(data.get("ip")) && Objects.equals(port, udpInteger(data.get("port")))
+                    && data.get("requestId") instanceof String && !isBlank(data.getString("requestId"))
+                    && sent != null && received != null && sent >= 0 && sent <= 2
+                    && received >= 0 && received <= sent
+                    && (reachable ? received > 0 : received == 0)
+                    && (data.get("errorMessage") == null || data.get("errorMessage") instanceof String);
+            Double averageTime = udpNumber(data.get("averageTime"));
+            Double packetLoss = udpNumber(data.get("packetLoss"));
+            valid = valid && data.containsKey("averageTime") && data.containsKey("packetLoss")
+                    && (data.get("averageTime") == null || averageTime != null)
+                    && (data.get("packetLoss") == null || packetLoss != null);
+            if (reachable) {
+                valid = valid && averageTime != null && averageTime >= 0 && packetLoss != null
+                        && packetLoss >= 0 && packetLoss <= 100
+                        && Math.abs(packetLoss - (sent - received) * 100.0 / sent) < 0.01;
+            }
+            if (!valid) {
+                result.setMessage("UDP未确认：节点返回的UDP诊断字段缺失或不一致，请检查或更新节点");
+                return result;
+            }
+            result.setStatus(status);
+            result.setSuccess(reachable);
+            result.setSentPackets(sent);
+            result.setReceivedPackets(received);
+            String error = data.getString("errorMessage");
+            if (reachable) {
+                result.setAverageTime(averageTime);
+                result.setPacketLoss(packetLoss);
+                result.setMessage("UDP收到回包，目标可达");
+            } else if ("unreachable".equals(status)) {
+                result.setMessage("UDP明确不可达" + (isBlank(error) ? "" : "：" + error));
+            } else {
+                result.setMessage("UDP未确认：未收到回包，静默或超时不代表不可达"
+                        + (isBlank(error) ? "" : "；" + error));
+            }
+        } catch (Exception e) {
+            result.setMessage("UDP未确认：诊断执行异常；" + e.getMessage());
+        }
+        return result;
+    }
+
+    private Integer udpInteger(Object value) {
+        Double number = udpNumber(value);
+        return number != null && number >= 0 && number <= Integer.MAX_VALUE
+                && number == Math.rint(number) ? number.intValue() : null;
+    }
+
+    private Double udpNumber(Object value) {
+        if (!(value instanceof Number)) {
+            return null;
+        }
+        double number = ((Number) value).doubleValue();
+        return Double.isFinite(number) ? number : null;
+    }
+
     /**
      * 执行TCP ping诊断
      *
@@ -991,6 +1192,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 result.setPacketLoss(100.0);
             }
 
+            result.setStatus(result.isSuccess() ? "reachable" : "unreachable");
             return result;
         } catch (Exception e) {
             DiagnosisResult result = new DiagnosisResult();
@@ -1000,6 +1202,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             result.setTargetPort(port);
             result.setDescription(description);
             result.setSuccess(false);
+            result.setStatus("unknown");
             result.setMessage("诊断执行异常: " + e.getMessage());
             result.setTimestamp(System.currentTimeMillis());
             result.setAverageTime(-1.0);
@@ -1047,11 +1250,15 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
      * 获取所需的节点信息
      */
     private NodeInfo getRequiredNodes(Tunnel tunnel) {
-        List<Node> inNodes = resolveTunnelNodes(tunnel.getInGroupId(), tunnel.getInNodeId());
+        return getRequiredNodes(tunnel, false);
+    }
+
+    private NodeInfo getRequiredNodes(Tunnel tunnel, boolean includeOffline) {
+        List<Node> inNodes = resolveTunnelNodes(tunnel.getInGroupId(), tunnel.getInNodeId(), includeOffline);
         if (inNodes.isEmpty()) {
             return NodeInfo.error(tunnel.getInGroupId() == null ? "入口节点不存在" : "入口节点组没有在线节点");
         }
-        if (tunnel.getInGroupId() == null) {
+        if (!includeOffline && tunnel.getInGroupId() == null) {
             for (Node node : inNodes) {
                 if (node.getStatus() != NODE_STATUS_ONLINE) {
                     return NodeInfo.error("入口节点离线: " + node.getName());
@@ -1061,11 +1268,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         List<Node> outNodes = Collections.emptyList();
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            outNodes = resolveTunnelNodes(tunnel.getOutGroupId(), tunnel.getOutNodeId());
+            outNodes = resolveTunnelNodes(tunnel.getOutGroupId(), tunnel.getOutNodeId(), includeOffline);
             if (outNodes.isEmpty()) {
                 return NodeInfo.error(tunnel.getOutGroupId() == null ? "出口节点不存在" : "出口节点组没有在线节点");
             }
-            if (tunnel.getOutGroupId() == null) {
+            if (!includeOffline && tunnel.getOutGroupId() == null) {
                 for (Node node : outNodes) {
                     if (node.getStatus() != NODE_STATUS_ONLINE) {
                         return NodeInfo.error("出口节点离线: " + node.getName());
@@ -1078,10 +1285,16 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private List<Node> resolveTunnelNodes(Long groupId, Long nodeId) {
+        return resolveTunnelNodes(groupId, nodeId, false);
+    }
+
+    private List<Node> resolveTunnelNodes(Long groupId, Long nodeId, boolean includeOffline) {
         if (groupId != null) {
-            R pruneResult = aggregateNodeGroupService.pruneOfflineNodes(groupId);
-            if (pruneResult.getCode() != 0) {
-                log.warn("自动清理节点组{}离线成员失败: {}", groupId, pruneResult.getMsg());
+            if (!includeOffline) {
+                R pruneResult = aggregateNodeGroupService.pruneOfflineNodes(groupId);
+                if (pruneResult.getCode() != 0) {
+                    log.warn("自动清理节点组{}离线成员失败: {}", groupId, pruneResult.getMsg());
+                }
             }
             AggregateNodeGroup group = aggregateNodeGroupService.getById(groupId);
             if (group == null) {
@@ -1095,7 +1308,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             List<Node> nodes = new ArrayList<>();
             for (Long id : nodeIds) {
                 Node node = nodeMap.get(id);
-                if (node != null && node.getStatus() == NODE_STATUS_ONLINE) {
+                if (node != null && (includeOffline || Objects.equals(node.getStatus(), NODE_STATUS_ONLINE))) {
                     nodes.add(node);
                 }
             }
@@ -1853,8 +2066,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         private String description;
         private boolean success;
         private String message;
-        private double averageTime;
-        private double packetLoss;
+        private String protocol = "tcp";
+        private String status = "unknown";
+        private Integer sentPackets;
+        private Integer receivedPackets;
+        private Double averageTime;
+        private Double packetLoss;
         private long timestamp;
     }
 }

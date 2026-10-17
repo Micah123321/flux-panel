@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { getDiagnosisPayloadError, normalizeDiagnosisPayload, normalizeDiagnosisReport } from "./forward-diagnosis";
+import type { DiagnosisProtocol, DiagnosisResult } from "./forward-diagnosis";
 import { runTour } from '@/utils/tour';
 import { splitAddresses, formatAddressPort } from '@/utils/address';
 import { Card, CardBody, CardHeader } from "@heroui/card";
@@ -40,6 +42,7 @@ import {
   batchCreateForwards,
   getForwardList,
   updateForward,
+  resyncForward,
   deleteForward,
   forceDeleteForward,
   batchDeleteForwards,
@@ -104,22 +107,6 @@ interface ImportResult {
   forwardName?: string;
 }
 
-interface DiagnosisResult {
-  forwardName: string;
-  timestamp: number;
-  results: Array<{
-    success: boolean;
-    description: string;
-    nodeName: string;
-    nodeId: string;
-    targetIp: string;
-    targetPort?: number;
-    message?: string;
-    averageTime?: number;
-    packetLoss?: number;
-  }>;
-}
-
 // 添加分组接口
 interface UserGroup {
   userId: number | null;
@@ -137,6 +124,8 @@ export default function ForwardPage() {
   const [loading, setLoading] = useState(true);
   const [forwards, setForwards] = useState<Forward[]>([]);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
+  const [syncingForwardIds, setSyncingForwardIds] = useState<Set<number>>(new Set());
+  const resyncRequests = useRef(new Set<number>());
 
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
@@ -173,6 +162,29 @@ export default function ForwardPage() {
     }
   });
 
+  // 按用户分别记录隧道 ID，避免同一隧道在不同用户下的展开状态互相影响。
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem('forward-expanded-groups') || '{}');
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+      return Object.fromEntries(
+        Object.entries(saved).filter(([, keys]) =>
+          Array.isArray(keys) && keys.every(key => typeof key === 'string')
+        )
+      );
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('forward-expanded-groups', JSON.stringify(expandedGroups));
+    } catch (error) {
+      console.warn('保存转发分组展开状态失败:', error);
+    }
+  }, [expandedGroups]);
+
   // 拖拽排序相关状态
   const [forwardOrder, setForwardOrder] = useState<number[]>([]);
 
@@ -182,6 +194,7 @@ export default function ForwardPage() {
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [diagnosisModalOpen, setDiagnosisModalOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
+  const [cloneSource, setCloneSource] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -195,6 +208,12 @@ export default function ForwardPage() {
   const [tunnelGroupToDelete, setTunnelGroupToDelete] = useState<{ tunnelId: number; tunnelName: string; count: number } | null>(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = useState<Forward | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
+  const [diagnosisProtocol, setDiagnosisProtocol] = useState<DiagnosisProtocol>("tcp");
+  const [diagnosisPayload, setDiagnosisPayload] = useState("");
+  const diagnosisRequestId = useRef(0);
+  const diagnosisPayloadError = diagnosisProtocol === "udp" ? getDiagnosisPayloadError(diagnosisPayload) : undefined;
+
+  useEffect(() => () => { diagnosisRequestId.current += 1; }, []);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
 
@@ -457,6 +476,7 @@ export default function ForwardPage() {
   // 新增转发
   const handleAdd = () => {
     setIsEdit(false);
+    setCloneSource(null);
     setForm({
       name: '',
       tunnelId: null,
@@ -473,6 +493,7 @@ export default function ForwardPage() {
   // 编辑转发
   const handleEdit = (forward: Forward) => {
     setIsEdit(true);
+    setCloneSource(null);
     setForm({
       id: forward.id,
       userId: forward.userId,
@@ -486,6 +507,33 @@ export default function ForwardPage() {
     const tunnel = tunnels.find(t => t.id === forward.tunnelId);
     setSelectedTunnel(tunnel || null);
     setErrors({});
+    setModalOpen(true);
+  };
+
+  const handleClone = (forward: Forward) => {
+    const existingNames = new Set(forwards.map(item => item.name));
+    let name = "";
+    let copyNumber = 1;
+    do {
+      const suffix = copyNumber === 1 ? " - 副本" : ` - 副本 ${copyNumber}`;
+      name = forward.name.trim().slice(0, 50 - suffix.length).trimEnd() + suffix;
+      copyNumber += 1;
+    } while (existingNames.has(name));
+
+    const tunnel = tunnels.find(item => item.id === forward.tunnelId);
+    setIsEdit(false);
+    setCloneSource(forward.name);
+    // A clone uses the create endpoint and receives a new available port.
+    setForm({
+      name,
+      tunnelId: tunnel?.id ?? null,
+      inPort: null,
+      remoteAddr: splitAddresses(forward.remoteAddr).join("\n"),
+      interfaceName: forward.interfaceName || "",
+      strategy: forward.strategy || "fifo",
+    });
+    setSelectedTunnel(tunnel || null);
+    setErrors(tunnel ? {} : { tunnelId: "原隧道当前不可用，请重新选择隧道" });
     setModalOpen(true);
   };
 
@@ -723,7 +771,7 @@ export default function ForwardPage() {
       }
 
       if (res.code === 0) {
-        toast.success(isEdit ? '修改成功' : '创建成功');
+        toast.success(isEdit ? '修改成功' : cloneSource !== null ? '克隆创建成功' : '创建成功');
         setModalOpen(false);
         loadData();
       } else {
@@ -734,6 +782,26 @@ export default function ForwardPage() {
       toast.error('操作失败');
     } finally {
       setSubmitLoading(false);
+    }
+  };
+
+  const handleResync = async (forward: Forward) => {
+    if (forward.status !== -1 || resyncRequests.current.has(forward.id)) return;
+    resyncRequests.current.add(forward.id);
+    setSyncingForwardIds(new Set(resyncRequests.current));
+    try {
+      const response = await resyncForward(forward.id);
+      if (response.code === 0) {
+        toast.success('配置已同步');
+        await loadData(false);
+      } else {
+        toast.error(response.msg || '配置同步失败，请重试');
+      }
+    } catch {
+      toast.error('配置同步请求未完成，请重试');
+    } finally {
+      resyncRequests.current.delete(forward.id);
+      setSyncingForwardIds(new Set(resyncRequests.current));
     }
   };
 
@@ -790,55 +858,74 @@ export default function ForwardPage() {
     }
   };
 
-  // 诊断转发
-  const handleDiagnose = async (forward: Forward) => {
+  const clearDiagnosis = () => {
+    diagnosisRequestId.current += 1;
+    setDiagnosisResult(null);
+    setDiagnosisLoading(false);
+  };
+
+  const handleDiagnosisOpenChange = (isOpen: boolean) => {
+    if (!isOpen) clearDiagnosis();
+    setDiagnosisModalOpen(isOpen);
+  };
+
+  const handleDiagnose = (forward: Forward) => {
+    clearDiagnosis();
     setCurrentDiagnosisForward(forward);
+    setDiagnosisProtocol("tcp");
+    setDiagnosisPayload("");
     setDiagnosisModalOpen(true);
+  };
+
+  const runDiagnosis = async () => {
+    if (!currentDiagnosisForward || diagnosisPayloadError) return;
+    const forward = currentDiagnosisForward;
+    const protocol = diagnosisProtocol;
+    const payload = normalizeDiagnosisPayload(diagnosisPayload);
+    const requestId = ++diagnosisRequestId.current;
     setDiagnosisLoading(true);
     setDiagnosisResult(null);
 
-    try {
-      const response = await diagnoseForward(forward.id);
-      if (response.code === 0) {
-        setDiagnosisResult(response.data);
-      } else {
-        toast.error(response.msg || '诊断失败');
-        setDiagnosisResult({
-          forwardName: forward.name,
-          timestamp: Date.now(),
-          results: [{
-            success: false,
-            description: '诊断失败',
-            nodeName: '-',
-            nodeId: '-',
-            targetIp: forward.remoteAddr.split(',')[0] || '-',
-            message: response.msg || '诊断过程中发生错误'
-          }]
-        });
-      }
-    } catch (error) {
-      console.error('诊断失败:', error);
-      toast.error('网络错误，请重试');
+    const showExecutionIssue = (message: string) => {
       setDiagnosisResult({
         forwardName: forward.name,
+        protocol,
         timestamp: Date.now(),
         results: [{
+          protocol,
+          status: protocol === "udp" ? "unknown" : "unreachable",
           success: false,
-          description: '网络错误',
-          nodeName: '-',
-          nodeId: '-',
-          targetIp: forward.remoteAddr.split(',')[0] || '-',
-          message: '无法连接到服务器'
-        }]
+          description: protocol === "udp" ? "UDP 诊断未确认" : "诊断失败",
+          nodeName: "-",
+          nodeId: "-",
+          targetIp: splitAddresses(forward.remoteAddr)[0] || "-",
+          message,
+        }],
       });
+    };
+
+    try {
+      const response = await diagnoseForward(forward.id, {
+        protocol,
+        ...(protocol === "udp" && payload ? { payload } : {}),
+      });
+      if (requestId !== diagnosisRequestId.current) return;
+      if (response.code === 0 && Array.isArray(response.data?.results) && response.data.results.length > 0) {
+        setDiagnosisResult(normalizeDiagnosisReport(response.data, protocol));
+      } else {
+        showExecutionIssue(response.msg || "本次诊断未返回有效探测结果，请重试");
+      }
+    } catch {
+      if (requestId !== diagnosisRequestId.current) return;
+      showExecutionIssue("本次诊断请求未完成，请检查网络后重试");
     } finally {
-      setDiagnosisLoading(false);
+      if (requestId === diagnosisRequestId.current) setDiagnosisLoading(false);
     }
   };
 
   // 获取连接质量
-  const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
-    if (averageTime === undefined || packetLoss === undefined) return null;
+  const getQualityDisplay = (averageTime?: number | null, packetLoss?: number | null) => {
+    if (averageTime == null || packetLoss == null) return null;
 
     if (averageTime < 30 && packetLoss === 0) return { text: '🚀 优秀', color: 'success' };
     if (averageTime < 50 && packetLoss === 0) return { text: '✨ 很好', color: 'success' };
@@ -1174,13 +1261,13 @@ export default function ForwardPage() {
   const getStatusDisplay = (status: number) => {
     switch (status) {
       case 1:
-        return { color: 'success', text: '正常' };
+        return { color: 'success', text: '已启用', description: '转发配置已启用，连通性可通过诊断检查' };
       case 0:
-        return { color: 'warning', text: '暂停' };
+        return { color: 'warning', text: '已暂停', description: '转发配置已暂停' };
       case -1:
-        return { color: 'danger', text: '异常' };
+        return { color: 'warning', text: '同步失败', description: '上次配置下发失败，节点可能仍在运行旧配置；可重新同步' };
       default:
-        return { color: 'default', text: '未知' };
+        return { color: 'default', text: '未知', description: '转发配置状态未知' };
     }
   };
 
@@ -1377,14 +1464,18 @@ export default function ForwardPage() {
                   </svg>
                 </div>
               )}
-              <Switch
-                size="sm"
-                isSelected={forward.serviceRunning}
-                onValueChange={() => handleServiceToggle(forward)}
-                isDisabled={forward.status !== 1 && forward.status !== 0}
-              />
+              {forward.status !== -1 && (
+                <Switch
+                  size="sm"
+                  aria-label={`启停转发：${forward.name}`}
+                  isSelected={forward.serviceRunning}
+                  onValueChange={() => handleServiceToggle(forward)}
+                  isDisabled={forward.status !== 1 && forward.status !== 0}
+                />
+              )}
               <Chip
                 color={statusDisplay.color as any}
+                title={statusDisplay.description}
                 variant="flat"
                 size="sm"
                 className="text-xs"
@@ -1461,13 +1552,27 @@ export default function ForwardPage() {
             </div>
           </div>
 
-          <div className="flex gap-1.5 mt-3">
+          <div className="grid grid-cols-2 gap-1.5 mt-3">
+            {forward.status === -1 && (
+              <Button
+                size="sm"
+                variant="flat"
+                color="primary"
+                className="col-span-2 min-w-0 min-h-8"
+                aria-label={`重新同步转发：${forward.name}`}
+                title="重新下发当前配置，成功后恢复启用状态"
+                isLoading={syncingForwardIds.has(forward.id)}
+                onPress={() => handleResync(forward)}
+              >
+                重新同步
+              </Button>
+            )}
             <Button
               size="sm"
               variant="flat"
               color="primary"
               onPress={() => handleEdit(forward)}
-              className="flex-1 min-h-8"
+              className="min-w-0 min-h-8 px-2 gap-1"
               startContent={
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -1479,9 +1584,25 @@ export default function ForwardPage() {
             <Button
               size="sm"
               variant="flat"
+              color="secondary"
+              onPress={() => handleClone(forward)}
+              aria-label={`克隆转发：${forward.name}`}
+              className="min-w-0 min-h-8 px-2 gap-1"
+              startContent={
+                <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="8" y="8" width="12" height="12" rx="2" strokeWidth={2} />
+                  <path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3" strokeWidth={2} />
+                </svg>
+              }
+            >
+              克隆
+            </Button>
+            <Button
+              size="sm"
+              variant="flat"
               color="warning"
               onPress={() => handleDiagnose(forward)}
-              className="flex-1 min-h-8"
+              className="min-w-0 min-h-8 px-2 gap-1"
               startContent={
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -1495,7 +1616,7 @@ export default function ForwardPage() {
               variant="flat"
               color="danger"
               onPress={() => handleDelete(forward)}
-              className="flex-1 min-h-8"
+              className="min-w-0 min-h-8 px-2 gap-1"
               startContent={
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clipRule="evenodd" />
@@ -1673,10 +1794,24 @@ export default function ForwardPage() {
                   </CardHeader>
 
                   <CardBody className="pt-0">
-                    <Accordion variant="splitted" className="px-0">
+                    <Accordion
+                      selectionMode="multiple"
+                      selectedKeys={expandedGroups[userGroup.userId ?? 'unknown'] ?? []}
+                      onSelectionChange={(keys) => {
+                        const tunnelIds = keys === 'all'
+                          ? userGroup.tunnelGroups.map(group => group.tunnelId.toString())
+                          : Array.from(keys, String);
+                        setExpandedGroups(previous => ({
+                          ...previous,
+                          [userGroup.userId ?? 'unknown']: tunnelIds,
+                        }));
+                      }}
+                      variant="splitted"
+                      className="px-0"
+                    >
                       {userGroup.tunnelGroups.map((tunnelGroup) => (
                         <AccordionItem
-                          key={tunnelGroup.tunnelId}
+                          key={tunnelGroup.tunnelId.toString()}
                           aria-label={tunnelGroup.tunnelName}
                           title={
                             <div className="flex items-center justify-between w-full min-w-0 pr-4">
@@ -1692,7 +1827,7 @@ export default function ForwardPage() {
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                                 <Chip variant="flat" size="sm" className="text-xs">
-                                  {tunnelGroup.forwards.filter(f => f.serviceRunning).length}/{tunnelGroup.forwards.length}
+                                  已启用 {tunnelGroup.forwards.filter(f => f.serviceRunning).length}/{tunnelGroup.forwards.length}
                                 </Chip>
                                 {!batchMode && (
                                   <Button
@@ -1799,10 +1934,12 @@ export default function ForwardPage() {
               <>
                 <ModalHeader className="flex flex-col gap-1">
                   <h2 className="text-xl font-bold">
-                    {isEdit ? '编辑转发' : '新增转发'}
+                    {isEdit ? '编辑转发' : cloneSource !== null ? '克隆转发' : '新增转发'}
                   </h2>
-                  <p className="text-small text-default-500">
-                    {isEdit ? '修改现有转发配置的信息' : '创建新的转发配置'}
+                  <p className="text-small text-default-500 break-words">
+                    {isEdit ? '修改现有转发配置的信息' : cloneSource !== null
+                      ? `基于「${cloneSource}」创建新转发，修改配置后保存。入口端口留空可自动分配。`
+                      : '创建新的转发配置'}
                   </p>
                 </ModalHeader>
                 <ModalBody>
@@ -2307,143 +2444,164 @@ export default function ForwardPage() {
         {/* 诊断结果模态框 */}
         <Modal
           isOpen={diagnosisModalOpen}
-          onOpenChange={setDiagnosisModalOpen}
-
+          onOpenChange={handleDiagnosisOpenChange}
           size="2xl"
-        scrollBehavior="outside"
-        backdrop="blur"
-        placement="center"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
         >
           <ModalContent>
-            {(onClose) => (
-              <>
-                <ModalHeader className="flex flex-col gap-1">
-                  <h2 className="text-xl font-bold">转发诊断结果</h2>
-                  {currentDiagnosisForward && (
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-small text-default-500 truncate flex-1 min-w-0">{currentDiagnosisForward.name}</span>
-                      <Chip
-                        color="primary"
-                        variant="flat"
-                        size="sm"
-                        className="flex-shrink-0"
-                      >
-                        转发服务
-                      </Chip>
-                    </div>
-                  )}
-                </ModalHeader>
-                <ModalBody>
-                  {diagnosisLoading ? (
-                    <div className="flex items-center justify-center py-16">
-                      <div className="flex items-center gap-3">
-                        <Spinner size="sm" />
-                        <span className="text-default-600">正在诊断转发连接...</span>
-                      </div>
-                    </div>
-                  ) : diagnosisResult ? (
-                    <div className="space-y-4">
-                      {diagnosisResult.results.map((result, index) => {
-                        const quality = getQualityDisplay(result.averageTime, result.packetLoss);
+            <ModalHeader className="flex flex-col gap-1">
+              <h2 className="text-xl font-bold">转发诊断</h2>
+              {currentDiagnosisForward && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-small text-default-500 truncate flex-1 min-w-0">{currentDiagnosisForward.name}</span>
+                  <Chip color="primary" variant="flat" size="sm" className="flex-shrink-0">转发服务</Chip>
+                </div>
+              )}
+            </ModalHeader>
+            <ModalBody>
+              <Select
+                label="探测协议"
+                selectedKeys={[diagnosisProtocol]}
+                disallowEmptySelection
+                onSelectionChange={(keys) => {
+                  const protocol = Array.from(keys)[0];
+                  if ((protocol === "tcp" || protocol === "udp") && protocol !== diagnosisProtocol) {
+                    clearDiagnosis();
+                    setDiagnosisProtocol(protocol);
+                  }
+                }}
+              >
+                <SelectItem key="tcp">TCP</SelectItem>
+                <SelectItem key="udp">UDP</SelectItem>
+              </Select>
+              {diagnosisProtocol === "udp" && (
+                <Textarea
+                  label="探测数据（十六进制）"
+                  placeholder="可选，例如：00 01 02 03"
+                  value={diagnosisPayload}
+                  onValueChange={(value) => {
+                    clearDiagnosis();
+                    setDiagnosisPayload(value);
+                  }}
+                  minRows={2}
+                  isInvalid={!!diagnosisPayloadError}
+                  errorMessage={diagnosisPayloadError}
+                  description="留空使用通用报文。默认报文不保证业务回包，超时表示未确认；与目标协议匹配的报文更适合验证。最多 2048 个十六进制字符，可使用空格分隔。"
+                  classNames={{ input: "font-mono" }}
+                />
+              )}
+              {diagnosisLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="flex items-center gap-3">
+                    <Spinner size="sm" />
+                    <span className="text-default-600">正在进行 {diagnosisProtocol.toUpperCase()} 诊断...</span>
+                  </div>
+                </div>
+              ) : diagnosisResult ? (
+                <div className="space-y-4">
+                  {diagnosisResult.results.map((result, index) => {
+                    const status = result.status ?? "unknown";
+                    const isUdp = result.protocol === "udp";
+                    const color = status === "reachable" ? "success" : status === "unreachable" ? "danger" : "warning";
+                    const border = status === "reachable" ? "border-success" : status === "unreachable" ? "border-danger" : "border-warning";
+                    const label = status === "unknown" ? "未确认" : isUdp
+                      ? (status === "reachable" ? "收到回包" : "明确不可达")
+                      : (status === "reachable" ? "连接成功" : "连接失败");
+                    const quality = status === "reachable" && result.protocol === "tcp"
+                      ? getQualityDisplay(result.averageTime, result.packetLoss) : null;
+                    const target = result.targetPort != null
+                      ? formatAddressPort(result.targetIp, result.targetPort) : result.targetIp;
+                    const latency = result.averageTime != null && Number.isFinite(result.averageTime)
+                      ? result.averageTime.toFixed(0) : "—";
 
-                        return (
-                          <Card key={index} className={`shadow-sm border ${result.success ? 'border-success' : 'border-danger'}`}>
-                            <CardHeader className="pb-2">
-                              <div className="flex items-center justify-between w-full">
-                                <div>
-                                  <h3 className="text-lg font-semibold text-foreground">{result.description}</h3>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-small text-default-500">节点: {result.nodeName}</span>
-                                    <Chip
-                                      color={result.success ? 'success' : 'danger'}
-                                      variant="flat"
-                                      size="sm"
-                                    >
-                                      {result.success ? '连接成功' : '连接失败'}
-                                    </Chip>
-                                  </div>
-                                </div>
+                    return (
+                      <Card key={index} className={"shadow-sm border " + border}>
+                        <CardHeader className="pb-2">
+                          <div className="min-w-0">
+                            <h3 className="text-lg font-semibold text-foreground">{result.description}</h3>
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                              <span className="text-small text-default-500">节点: {result.nodeName}</span>
+                              <Chip variant="flat" size="sm">{result.protocol?.toUpperCase() ?? "协议未确认"}</Chip>
+                              <Chip color={color} variant="flat" size="sm">{label}</Chip>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardBody className="pt-0 space-y-3">
+                          {status === "reachable" && (
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="text-center">
+                                <div className="text-2xl font-bold text-primary">{latency}</div>
+                                <div className="text-small text-default-500">{isUdp ? "往返时间(ms)" : "平均延迟(ms)"}</div>
                               </div>
-                            </CardHeader>
-
-                            <CardBody className="pt-0">
-                              {result.success ? (
-                                <div className="space-y-3">
-                                  <div className="grid grid-cols-3 gap-4">
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-primary">{result.averageTime?.toFixed(0)}</div>
-                                      <div className="text-small text-default-500">平均延迟(ms)</div>
-                                    </div>
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-warning">{result.packetLoss?.toFixed(1)}</div>
-                                      <div className="text-small text-default-500">丢包率(%)</div>
-                                    </div>
-                                    <div className="text-center">
-                                      {quality && (
-                                        <>
-                                          <Chip color={quality.color as any} variant="flat" size="lg">
-                                            {quality.text}
-                                          </Chip>
-                                          <div className="text-small text-default-500 mt-1">连接质量</div>
-                                        </>
-                                      )}
-                                    </div>
+                              {isUdp ? (
+                                <>
+                                  <div className="text-center">
+                                    <div className="text-2xl font-bold text-primary">{result.sentPackets ?? "—"}</div>
+                                    <div className="text-small text-default-500">发送包数</div>
                                   </div>
-                                  <div className="text-small text-default-500 flex items-center gap-1">
-                                    <span className="flex-shrink-0">目标地址:</span>
-                                    <code className="font-mono truncate min-w-0" title={`${result.targetIp}${result.targetPort ? ':' + result.targetPort : ''}`}>
-                                      {result.targetIp}{result.targetPort ? ':' + result.targetPort : ''}
-                                    </code>
+                                  <div className="text-center">
+                                    <div className="text-2xl font-bold text-success">{result.receivedPackets ?? "—"}</div>
+                                    <div className="text-small text-default-500">收到包数</div>
                                   </div>
-                                </div>
+                                </>
                               ) : (
-                                <div className="space-y-2">
-                                  <div className="text-small text-default-500 flex items-center gap-1">
-                                    <span className="flex-shrink-0">目标地址:</span>
-                                    <code className="font-mono truncate min-w-0" title={`${result.targetIp}${result.targetPort ? ':' + result.targetPort : ''}`}>
-                                      {result.targetIp}{result.targetPort ? ':' + result.targetPort : ''}
-                                    </code>
+                                <>
+                                  <div className="text-center">
+                                    <div className="text-2xl font-bold text-warning">{result.packetLoss?.toFixed(1) ?? "—"}</div>
+                                    <div className="text-small text-default-500">丢包率(%)</div>
                                   </div>
-                                  <Alert
-                                    color="danger"
-                                    variant="flat"
-                                    title="错误详情"
-                                    description={result.message}
-                                  />
-                                </div>
+                                  <div className="text-center">
+                                    {quality && (
+                                      <>
+                                        <Chip color={quality.color as any} variant="flat" size="lg">{quality.text}</Chip>
+                                        <div className="text-small text-default-500 mt-1">连接质量</div>
+                                      </>
+                                    )}
+                                  </div>
+                                </>
                               )}
-                            </CardBody>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-16">
-                      <div className="w-16 h-16 bg-default-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <svg className="w-8 h-8 text-default-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </div>
-                      <h3 className="text-lg font-semibold text-foreground">暂无诊断数据</h3>
-                    </div>
-                  )}
-                </ModalBody>
-                <ModalFooter>
-                  <Button variant="light" onPress={onClose}>
-                    关闭
-                  </Button>
-                  {currentDiagnosisForward && (
-                    <Button
-                      color="primary"
-                      onPress={() => handleDiagnose(currentDiagnosisForward)}
-                      isLoading={diagnosisLoading}
-                    >
-                      重新诊断
-                    </Button>
-                  )}
-                </ModalFooter>
-              </>
-            )}
+                            </div>
+                          )}
+                          <div className="text-small text-default-500 flex items-center gap-1">
+                            <span className="flex-shrink-0">目标地址:</span>
+                            <code className="font-mono truncate min-w-0" title={target}>{target}</code>
+                          </div>
+                          {status !== "reachable" ? (
+                            <Alert
+                              color={color}
+                              variant="flat"
+                              title={status === "unknown" ? "探测结果未确认" : isUdp ? "目标明确不可达" : "错误详情"}
+                              description={result.message || (status === "unknown" ? "尚未确认目标是否可达，请检查探测数据后重试。" : "目标不可达，请检查目标地址与服务状态。")}
+                            />
+                          ) : result.message && (
+                            <p className="text-small text-default-500 break-words">{result.message}</p>
+                          )}
+                        </CardBody>
+                      </Card>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-10 text-default-500">
+                  选择探测协议后，点击“开始诊断”查看结果
+                </div>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <Button variant="light" onPress={() => handleDiagnosisOpenChange(false)}>关闭</Button>
+              {currentDiagnosisForward && (
+                <Button
+                  color="primary"
+                  onPress={runDiagnosis}
+                  isLoading={diagnosisLoading}
+                  isDisabled={!!diagnosisPayloadError}
+                >
+                  {diagnosisResult ? "重新诊断" : "开始诊断"}
+                </Button>
+              )}
+            </ModalFooter>
           </ModalContent>
         </Modal>
       </div>

@@ -253,7 +253,16 @@ public class CheckGostConfigAsync {
                     existingServices.add(service.getName());
                 }
             }
+            Set<String> existingChains = new HashSet<>();
+            if (gostConfig.getChains() != null) {
+                for (ConfigItem chain : gostConfig.getChains()) {
+                    existingChains.add(chain.getName());
+                }
+            }
             for (Tunnel tunnel : tunnelList) {
+                boolean tunnelForward = Objects.equals(tunnel.getType(), TUNNEL_TYPE_TUNNEL_FORWARD);
+                boolean entryNode = tunnelContainsNode(tunnel.getInGroupId(), tunnel.getInNodeId(), node.getId());
+                boolean exitNode = tunnelForward && tunnelContainsNode(tunnel.getOutGroupId(), tunnel.getOutNodeId(), node.getId());
                 List<Forward> forwardList = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnel.getId()));
                 if (forwardList == null || forwardList.isEmpty()) continue;
                 for (Forward forward : forwardList) {
@@ -266,10 +275,13 @@ public class CheckGostConfigAsync {
                     boolean tcpExists = existingServices.contains(serviceName + "_tcp");
                     boolean udpExists = existingServices.contains(serviceName + "_udp");
                     boolean tlsExists = existingServices.contains(serviceName + "_tls");
-                    if (tcpExists && udpExists && (tunnel.getType() == null || tunnel.getType() != TUNNEL_TYPE_TUNNEL_FORWARD || tlsExists)) {
+                    // 入口需要 TCP/UDP 和隧道链，出口只需要远程服务；同一节点可兼任两种角色。
+                    boolean entryComplete = !entryNode || (tcpExists && udpExists && (!tunnelForward || existingChains.contains(serviceName + "_chains")));
+                    boolean exitComplete = !exitNode || tlsExists;
+                    if (entryComplete && exitComplete) {
                         continue;
                     }
-                    // 缺失任一服务则整组重建
+                    // 仅缺失当前节点所需配置时才重建整条转发。
                     forwardService.updateForwardA(forward);
                 }
             }

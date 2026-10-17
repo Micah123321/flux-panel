@@ -44,6 +44,8 @@ public interface ForwardService extends IService<Forward> {
      */
     R updateForward(ForwardUpdateDto forwardUpdateDto);
 
+    R resyncForward(Long id);
+
     /**
      * 删除端口转发
      * @param id 转发ID
@@ -79,6 +81,8 @@ public interface ForwardService extends IService<Forward> {
      * @return 诊断结果
      */
     R diagnoseForward(Long id);
+
+    R diagnoseForward(Long id, String protocol, String payload);
 
     /**
      * 更新转发排序

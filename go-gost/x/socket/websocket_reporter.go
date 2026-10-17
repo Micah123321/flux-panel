@@ -556,6 +556,13 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 		response.Type = "TcpPingResponse"
 		response.Data = tcpPingResult
 
+	case "UdpPing":
+		var udpPingResult UdpPingResponse
+		udpPingResult, err = w.handleUdpPing(cmd.Data)
+		udpPingResult.RequestId = cmd.RequestId
+		response.Type = "UdpPingResponse"
+		response.Data = udpPingResult
+
 	// Protocol blocking switches
 	case "SetProtocol":
 		err = w.handleSetProtocol(cmd.Data)
@@ -566,13 +573,16 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 		response.Type = "UnknownCommandResponse"
 	}
 
+	// Diagnostic commands do not change the node configuration.
+	if cmd.Type != "TcpPing" && cmd.Type != "UdpPing" {
+		saveConfig()
+	}
+
 	// 发送响应
 	if err != nil {
-		saveConfig()
 		response.Success = false
 		response.Message = err.Error()
 	} else {
-		saveConfig()
 		response.Success = true
 		response.Message = "OK"
 	}
@@ -673,8 +683,13 @@ func (w *WebSocketReporter) handleAddChain(data interface{}) error {
 		return fmt.Errorf("序列化数据失败: %v", err)
 	}
 
+	processedData, err := w.preprocessDurationFields(jsonData)
+	if err != nil {
+		return fmt.Errorf("预处理duration字段失败: %v", err)
+	}
+
 	var chainConfig config.ChainConfig
-	if err := json.Unmarshal(jsonData, &chainConfig); err != nil {
+	if err := json.Unmarshal(processedData, &chainConfig); err != nil {
 		return fmt.Errorf("解析链配置失败: %v", err)
 	}
 
@@ -688,17 +703,24 @@ func (w *WebSocketReporter) handleUpdateChain(data interface{}) error {
 		return fmt.Errorf("序列化数据失败: %v", err)
 	}
 
+	processedData, err := w.preprocessDurationFields(jsonData)
+	if err != nil {
+		return fmt.Errorf("预处理duration字段失败: %v", err)
+	}
+
 	// 对于更新操作，Java端发送的格式可能是: {"chain": "name", "data": {...}}
 	var updateReq struct {
 		Chain string             `json:"chain"`
 		Data  config.ChainConfig `json:"data"`
 	}
 
-	// 尝试解析为更新请求格式
-	if err := json.Unmarshal(jsonData, &updateReq); err != nil {
-		// 如果失败，可能是直接的ChainConfig，从name字段获取chain名称
+	if err := json.Unmarshal(processedData, &updateReq); err != nil {
+		return fmt.Errorf("解析链配置失败: %v", err)
+	}
+	// Direct ChainConfig JSON also unmarshals successfully into the wrapper.
+	if updateReq.Chain == "" {
 		var chainConfig config.ChainConfig
-		if err := json.Unmarshal(jsonData, &chainConfig); err != nil {
+		if err := json.Unmarshal(processedData, &chainConfig); err != nil {
 			return fmt.Errorf("解析链配置失败: %v", err)
 		}
 		updateReq.Chain = chainConfig.Name
@@ -1260,7 +1282,9 @@ func isValidHostname(hostname string) bool {
 // preprocessDurationFields 预处理 JSON 数据中的 duration 字段
 func (w *WebSocketReporter) preprocessDurationFields(jsonData []byte) ([]byte, error) {
 	var rawData interface{}
-	if err := json.Unmarshal(jsonData, &rawData); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(jsonData))
+	decoder.UseNumber()
+	if err := decoder.Decode(&rawData); err != nil {
 		return nil, err
 	}
 

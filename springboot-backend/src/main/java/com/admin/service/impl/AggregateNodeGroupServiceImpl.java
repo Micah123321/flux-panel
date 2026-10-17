@@ -125,13 +125,6 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
     @Override
     public R listGroups() {
         List<AggregateNodeGroup> groups = list(new QueryWrapper<AggregateNodeGroup>().orderByDesc("created_time"));
-        for (AggregateNodeGroup group : groups) {
-            R pruneResult = pruneOfflineNodes(group.getId());
-            if (pruneResult.getCode() != 0) {
-                log.warn("节点组{}离线成员自动清理失败: {}", group.getId(), pruneResult.getMsg());
-            }
-        }
-        groups = list(new QueryWrapper<AggregateNodeGroup>().orderByDesc("created_time"));
         List<Map<String, Object>> data = groups.stream().map(this::enrichGroup).collect(Collectors.toList());
         return R.ok(data);
     }
@@ -142,41 +135,9 @@ public class AggregateNodeGroupServiceImpl extends ServiceImpl<AggregateNodeGrou
         if (group == null) {
             return R.err("节点组不存在");
         }
-        List<Long> oldNodeIds = parseNodeIds(group);
-        if (oldNodeIds.isEmpty()) {
-            return R.ok(enrichGroup(group));
-        }
-        Map<Long, Node> nodeMap = loadNodeMap(oldNodeIds);
-        List<Long> onlineNodeIds = new ArrayList<>();
-        List<Long> removedNodeIds = new ArrayList<>();
-        List<String> removedNodeNames = new ArrayList<>();
-        for (Long nodeId : oldNodeIds) {
-            Node node = nodeMap.get(nodeId);
-            if (node != null && node.getStatus() == NODE_STATUS_ONLINE) {
-                onlineNodeIds.add(nodeId);
-            } else {
-                removedNodeIds.add(nodeId);
-                removedNodeNames.add(node == null ? "#" + nodeId : node.getName());
-            }
-        }
-        if (removedNodeIds.isEmpty()) {
-            return R.ok(enrichGroup(group));
-        }
-
-        group.setNodeIds(joinNodeIds(onlineNodeIds));
-        group.setUpdatedTime(System.currentTimeMillis());
-        if (!updateById(group)) {
-            return R.err("节点组离线成员清理失败");
-        }
-
-        Map<String, Object> data = enrichGroup(group);
-        data.put("removedNodeIds", removedNodeIds);
-        data.put("removedNodeNames", removedNodeNames);
-        R syncResult = syncMemberChanges(group.getId(), oldNodeIds, onlineNodeIds, data, "节点组已清理离线成员，但部分转发同步失败");
-        if (syncResult != null) {
-            return syncResult;
-        }
-        return R.ok(data);
+        // Disconnects and restarts must not change the saved member selection.
+        // Keep this legacy entry point read-only for existing callers.
+        return R.ok(enrichGroup(group));
     }
 
     @Override

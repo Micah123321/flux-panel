@@ -55,6 +55,7 @@ export const createForward = (data: any) => Network.post("/forward/create", data
 export const batchCreateForwards = (forwards: any[]) => Network.post("/forward/batch-create", { forwards });
 export const getForwardList = () => Network.post("/forward/list");
 export const updateForward = (data: any) => Network.post("/forward/update", data);
+export const resyncForward = (id: number) => Network.post("/forward/resync", { id });
 export const deleteForward = (id: number) => Network.post("/forward/delete", { id });
 export const forceDeleteForward = (id: number) => Network.post("/forward/force-delete", { id });
 export const batchDeleteForwards = (ids: number[], force: boolean = false) => Network.post("/forward/batch-delete", { ids, force });
@@ -64,7 +65,8 @@ export const pauseForwardService = (forwardId: number) => Network.post("/forward
 export const resumeForwardService = (forwardId: number) => Network.post("/forward/resume", { id: forwardId });
 
 // 转发诊断操作
-export const diagnoseForward = (forwardId: number) => Network.post("/forward/diagnose", { forwardId });
+export const diagnoseForward = (forwardId: number, options?: { protocol?: "tcp" | "udp"; payload?: string }) =>
+  Network.post("/forward/diagnose", { forwardId, ...options });
 
 // 转发排序操作
 export const updateForwardOrder = (data: { forwards: Array<{ id: number; inx: number }> }) => Network.post("/forward/update-order", data);
